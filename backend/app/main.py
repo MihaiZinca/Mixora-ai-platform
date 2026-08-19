@@ -22,6 +22,7 @@ from app.database import (
     get_db,
 )
 from app.models import (
+    AppSetting,
     Conversation,
     ConversationReply,
     KnowledgeDocument,
@@ -44,6 +45,8 @@ from app.schemas import (
     ReplyResponse,
     TicketResponse,
     TicketStatusUpdate,
+    ResponseModeResponse,
+    ResponseModeUpdate,
 )
 
 
@@ -89,11 +92,6 @@ app.add_middleware(
 )
 
 
-# =========================================================
-# HEALTH
-# =========================================================
-
-
 @app.get("/health")
 async def health():
     return {
@@ -103,9 +101,34 @@ async def health():
     }
 
 
-# =========================================================
-# CONVERSATIONS
-# =========================================================
+@app.get("/api/system/status")
+async def get_system_status(
+    db: AsyncSession = Depends(get_db),
+):
+    database_status = "online"
+    qdrant_status = "online"
+
+    try:
+        await db.execute(
+            select(func.count())
+            .select_from(Conversation)
+        )
+    except Exception:
+        database_status = "offline"
+
+    try:
+        search_knowledge(
+            query="mixora system check",
+            limit=1,
+        )
+    except Exception:
+        qdrant_status = "offline"
+
+    return {
+        "api": "online",
+        "database": database_status,
+        "qdrant": qdrant_status,
+    }
 
 
 @app.get(
@@ -152,11 +175,6 @@ async def create_conversation(
     await db.refresh(conversation)
 
     return conversation
-
-
-# =========================================================
-# AI GENERATE REPLY
-# =========================================================
 
 
 @app.post(
@@ -213,11 +231,6 @@ async def generate_conversation_reply(
     )
 
 
-# =========================================================
-# REANALYZE
-# =========================================================
-
-
 @app.post(
     "/api/conversations/{conversation_id}/reanalyze",
     response_model=ConversationResponse,
@@ -253,11 +266,6 @@ async def reanalyze_conversation(
     await db.refresh(conversation)
 
     return conversation
-
-
-# =========================================================
-# CONVERSATION REPLIES
-# =========================================================
 
 
 @app.get(
@@ -345,11 +353,6 @@ async def send_conversation_reply(
     return reply
 
 
-# =========================================================
-# KNOWLEDGE BASE
-# =========================================================
-
-
 @app.get(
     "/api/knowledge",
     response_model=list[KnowledgeDocumentResponse],
@@ -394,7 +397,10 @@ async def upload_knowledge_document(
     if extension not in allowed_extensions:
         raise HTTPException(
             status_code=400,
-            detail="Momentan sunt acceptate doar fisiere TXT si MD.",
+            detail=(
+                "Momentan sunt acceptate doar "
+                "fisiere TXT si MD."
+            ),
         )
 
     raw_content = await file.read()
@@ -406,7 +412,10 @@ async def upload_knowledge_document(
     except UnicodeDecodeError:
         raise HTTPException(
             status_code=400,
-            detail="Fisierul trebuie sa foloseasca codarea UTF-8.",
+            detail=(
+                "Fisierul trebuie sa foloseasca "
+                "codarea UTF-8."
+            ),
         )
 
     if not content.strip():
@@ -433,7 +442,10 @@ async def upload_knowledge_document(
     if existing_document is not None:
         raise HTTPException(
             status_code=409,
-            detail="Documentul exista deja in baza de cunostinte.",
+            detail=(
+                "Documentul exista deja "
+                "in baza de cunostinte."
+            ),
         )
 
     file_path = (
@@ -480,8 +492,8 @@ async def upload_knowledge_document(
         raise HTTPException(
             status_code=500,
             detail=(
-                "Documentul a fost salvat, dar indexarea "
-                "in Qdrant a esuat."
+                "Documentul a fost salvat, "
+                "dar indexarea in Qdrant a esuat."
             ),
         ) from exc
 
@@ -493,9 +505,7 @@ async def upload_knowledge_document(
     return document
 
 
-@app.get(
-    "/api/knowledge/search"
-)
+@app.get("/api/knowledge/search")
 async def search_knowledge_endpoint(
     query: str,
 ):
@@ -565,13 +575,61 @@ async def delete_knowledge_document(
         "status": "sters",
         "document_id": document_id,
         "filename": document.filename,
-        "message": "Documentul a fost sters cu succes.",
+        "message": (
+            "Documentul a fost sters cu succes."
+        ),
     }
 
 
-# =========================================================
-# TICKETS
-# =========================================================
+@app.post(
+    "/api/knowledge/cleanup-duplicates"
+)
+async def cleanup_knowledge_duplicates(
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(KnowledgeDocument).order_by(
+            KnowledgeDocument.id.asc()
+        )
+    )
+
+    documents = result.scalars().all()
+
+    seen_filenames: set[str] = set()
+    removed_documents = []
+
+    for document in documents:
+        if document.filename not in seen_filenames:
+            seen_filenames.add(
+                document.filename
+            )
+            continue
+
+        try:
+            delete_document_vectors(
+                document_id=document.id
+            )
+        except Exception:
+            pass
+
+        removed_documents.append(
+            {
+                "id": document.id,
+                "filename": document.filename,
+            }
+        )
+
+        await db.delete(document)
+
+    await db.commit()
+
+    return {
+        "status": "ok",
+        "duplicate_sterse": len(
+            removed_documents
+        ),
+        "documente_sterse": removed_documents,
+    }
 
 
 @app.get(
@@ -627,7 +685,8 @@ async def create_ticket_from_conversation(
         raise HTTPException(
             status_code=409,
             detail=(
-                "Exista deja un tichet pentru aceasta conversatie."
+                "Exista deja un tichet "
+                "pentru aceasta conversatie."
             ),
         )
 
@@ -673,7 +732,9 @@ async def update_ticket_status(
     if payload.status not in allowed_statuses:
         raise HTTPException(
             status_code=400,
-            detail="Statusul tichetului nu este valid.",
+            detail=(
+                "Statusul tichetului nu este valid."
+            ),
         )
 
     result = await db.execute(
@@ -696,11 +757,6 @@ async def update_ticket_status(
     await db.refresh(ticket)
 
     return ticket
-
-
-# =========================================================
-# DASHBOARD STATS
-# =========================================================
 
 
 @app.get(
@@ -782,11 +838,6 @@ async def get_dashboard_stats(
     )
 
 
-# =========================================================
-# DASHBOARD RECENT CONVERSATIONS
-# =========================================================
-
-
 @app.get(
     "/api/dashboard/recent-conversations",
     response_model=list[
@@ -805,11 +856,6 @@ async def get_recent_conversations(
     )
 
     return result.scalars().all()
-
-
-# =========================================================
-# DASHBOARD INTENTS
-# =========================================================
 
 
 @app.get(
@@ -847,54 +893,152 @@ async def get_intent_stats(
         )
         for intent, count in rows
     ]
-@app.post("/api/knowledge/cleanup-duplicates")
-async def cleanup_knowledge_duplicates(
+
+@app.get(
+    "/api/settings/response-mode",
+    response_model=ResponseModeResponse,
+)
+async def get_response_mode(
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
-        select(KnowledgeDocument).order_by(
-            KnowledgeDocument.id.asc()
+        select(AppSetting).where(
+            AppSetting.key == "response_mode"
         )
     )
 
-    documents = result.scalars().all()
+    setting = result.scalar_one_or_none()
 
-    seen_filenames: set[str] = set()
-    removed_documents = []
-
-    for document in documents:
-        if document.filename not in seen_filenames:
-            seen_filenames.add(document.filename)
-            continue
-
-        try:
-            delete_document_vectors(
-                document_id=document.id
-            )
-        except Exception:
-            pass
-
-        file_path = (
-            KNOWLEDGE_DIR
-            / document.filename
+    if setting is None:
+        setting = AppSetting(
+            key="response_mode",
+            value="draft",
         )
 
+        db.add(setting)
 
-        removed_documents.append(
-            {
-                "id": document.id,
-                "filename": document.filename,
-            }
+        await db.commit()
+        await db.refresh(setting)
+
+    return ResponseModeResponse(
+        mode=setting.value,
+    )
+
+
+@app.put(
+    "/api/settings/response-mode",
+    response_model=ResponseModeResponse,
+)
+async def update_response_mode(
+    payload: ResponseModeUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    allowed_modes = {
+        "draft",
+        "auto",
+    }
+
+    if payload.mode not in allowed_modes:
+        raise HTTPException(
+            status_code=400,
+            detail="Modul de raspuns nu este valid.",
         )
 
-        await db.delete(document)
+    result = await db.execute(
+        select(AppSetting).where(
+            AppSetting.key == "response_mode"
+        )
+    )
+
+    setting = result.scalar_one_or_none()
+
+    if setting is None:
+        setting = AppSetting(
+            key="response_mode",
+            value=payload.mode,
+        )
+
+        db.add(setting)
+    else:
+        setting.value = payload.mode
 
     await db.commit()
+    await db.refresh(setting)
 
-    return {
-        "status": "ok",
-        "duplicate_sterse": len(
-            removed_documents
-        ),
-        "documente_sterse": removed_documents,
+    return ResponseModeResponse(
+        mode=setting.value,
+    )
+@app.get(
+    "/api/settings/response-mode",
+    response_model=ResponseModeResponse,
+)
+async def get_response_mode(
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(AppSetting).where(
+            AppSetting.key == "response_mode"
+        )
+    )
+
+    setting = result.scalar_one_or_none()
+
+    if setting is None:
+        setting = AppSetting(
+            key="response_mode",
+            value="draft",
+        )
+
+        db.add(setting)
+
+        await db.commit()
+        await db.refresh(setting)
+
+    return ResponseModeResponse(
+        mode=setting.value,
+    )
+
+
+@app.put(
+    "/api/settings/response-mode",
+    response_model=ResponseModeResponse,
+)
+async def update_response_mode(
+    payload: ResponseModeUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    allowed_modes = {
+        "draft",
+        "auto",
     }
+
+    if payload.mode not in allowed_modes:
+        raise HTTPException(
+            status_code=400,
+            detail="Modul de raspuns nu este valid.",
+        )
+
+    result = await db.execute(
+        select(AppSetting).where(
+            AppSetting.key == "response_mode"
+        )
+    )
+
+    setting = result.scalar_one_or_none()
+
+    if setting is None:
+        setting = AppSetting(
+            key="response_mode",
+            value=payload.mode,
+        )
+
+        db.add(setting)
+    else:
+        setting.value = payload.mode
+
+    await db.commit()
+    await db.refresh(setting)
+
+    return ResponseModeResponse(
+        mode=setting.value,
+    )

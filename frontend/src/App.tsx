@@ -4,7 +4,7 @@ import {
   BookOpen,
   Inbox,
   LayoutDashboard,
-  Settings,
+  Settings as SettingsIcon,
   TicketCheck,
 } from "lucide-react";
 
@@ -12,6 +12,7 @@ import Dashboard from "./pages/Dashboard";
 import InboxPage from "./pages/Inbox";
 import Tickets from "./pages/Tickets";
 import Knowledge from "./pages/Knowledge";
+import Settings from "./pages/Settings";
 
 import "./App.css";
 
@@ -33,6 +34,7 @@ function App() {
         <nav className="navigation">
           <NavLink
             to="/"
+            end
             className={({ isActive }) =>
               `navItem ${isActive ? "active" : ""}`
             }
@@ -73,10 +75,15 @@ function App() {
         </nav>
 
         <div className="sidebarBottom">
-          <button className="navItem">
-            <Settings size={19} />
+          <NavLink
+            to="/settings"
+            className={({ isActive }) =>
+              `navItem ${isActive ? "active" : ""}`
+            }
+          >
+            <SettingsIcon size={19} />
             Settings
-          </button>
+          </NavLink>
 
           <div className="systemStatus">
             <span className="statusDot" />
@@ -91,6 +98,7 @@ function App() {
           <Route path="/inbox" element={<InboxPage />} />
           <Route path="/tickets" element={<Tickets />} />
           <Route path="/knowledge" element={<Knowledge />} />
+          <Route path="/settings" element={<Settings />} />
         </Routes>
       </main>
     </div>

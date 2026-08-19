@@ -104,3 +104,11 @@ class ReplyResponse(BaseModel):
     model_config = ConfigDict(
         from_attributes=True
     )
+
+
+class ResponseModeUpdate(BaseModel):
+    mode: str
+
+
+class ResponseModeResponse(BaseModel):
+    mode: str
