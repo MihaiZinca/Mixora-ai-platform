@@ -137,6 +137,29 @@ def index_document(
     )
 
 
+def delete_document_vectors(
+    document_id: int,
+):
+    ensure_collection()
+
+    client.delete(
+        collection_name=COLLECTION_NAME,
+        points_selector=models.FilterSelector(
+            filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="document_id",
+                        match=models.MatchValue(
+                            value=document_id
+                        ),
+                    )
+                ]
+            )
+        ),
+        wait=True,
+    )
+
+
 def search_knowledge(
     query: str,
     limit: int = 3,
@@ -164,6 +187,9 @@ def search_knowledge(
         hits.append(
             {
                 "score": point.score,
+                "document_id": payload.get(
+                    "document_id"
+                ),
                 "filename": payload.get(
                     "filename"
                 ),

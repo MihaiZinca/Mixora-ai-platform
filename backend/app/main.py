@@ -28,6 +28,7 @@ from app.models import (
     Ticket,
 )
 from app.rag import (
+    delete_document_vectors,
     index_document,
     search_knowledge,
 )
@@ -70,9 +71,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="MIXORA API",
-    description=(
-        "Local-first AI Customer Operations Platform"
-    ),
+    description="Local-first AI Customer Operations Platform",
     version="0.1.0",
     lifespan=lifespan,
 )
@@ -179,7 +178,7 @@ async def generate_conversation_reply(
     if conversation is None:
         raise HTTPException(
             status_code=404,
-            detail="Conversation not found.",
+            detail="Conversatia nu a fost gasita.",
         )
 
     search_results = search_knowledge(
@@ -238,7 +237,7 @@ async def reanalyze_conversation(
     if conversation is None:
         raise HTTPException(
             status_code=404,
-            detail="Conversation not found.",
+            detail="Conversatia nu a fost gasita.",
         )
 
     analysis = analyze_message(
@@ -282,7 +281,7 @@ async def get_conversation_replies(
     if conversation is None:
         raise HTTPException(
             status_code=404,
-            detail="Conversation not found.",
+            detail="Conversatia nu a fost gasita.",
         )
 
     result = await db.execute(
@@ -321,7 +320,7 @@ async def send_conversation_reply(
     if conversation is None:
         raise HTTPException(
             status_code=404,
-            detail="Conversation not found.",
+            detail="Conversatia nu a fost gasita.",
         )
 
     content = payload.content.strip()
@@ -329,7 +328,7 @@ async def send_conversation_reply(
     if not content:
         raise HTTPException(
             status_code=400,
-            detail="Reply cannot be empty.",
+            detail="Raspunsul nu poate fi gol.",
         )
 
     reply = ConversationReply(
@@ -353,9 +352,7 @@ async def send_conversation_reply(
 
 @app.get(
     "/api/knowledge",
-    response_model=list[
-        KnowledgeDocumentResponse
-    ],
+    response_model=list[KnowledgeDocumentResponse],
 )
 async def get_knowledge_documents(
     db: AsyncSession = Depends(get_db),
@@ -380,7 +377,7 @@ async def upload_knowledge_document(
     if not file.filename:
         raise HTTPException(
             status_code=400,
-            detail="File name is missing.",
+            detail="Numele fisierului lipseste.",
         )
 
     extension = (
@@ -397,10 +394,7 @@ async def upload_knowledge_document(
     if extension not in allowed_extensions:
         raise HTTPException(
             status_code=400,
-            detail=(
-                "Only TXT and MD files "
-                "are supported for now."
-            ),
+            detail="Momentan sunt acceptate doar fisiere TXT si MD.",
         )
 
     raw_content = await file.read()
@@ -412,20 +406,35 @@ async def upload_knowledge_document(
     except UnicodeDecodeError:
         raise HTTPException(
             status_code=400,
-            detail=(
-                "File must use UTF-8 encoding."
-            ),
+            detail="Fisierul trebuie sa foloseasca codarea UTF-8.",
         )
 
     if not content.strip():
         raise HTTPException(
             status_code=400,
-            detail="File is empty.",
+            detail="Fisierul este gol.",
         )
 
-    safe_filename = (
-        Path(file.filename).name
+    safe_filename = Path(
+        file.filename
+    ).name
+
+    existing_result = await db.execute(
+        select(KnowledgeDocument).where(
+            KnowledgeDocument.filename
+            == safe_filename
+        )
     )
+
+    existing_document = (
+        existing_result.scalars().first()
+    )
+
+    if existing_document is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Documentul exista deja in baza de cunostinte.",
+        )
 
     file_path = (
         KNOWLEDGE_DIR
@@ -455,12 +464,26 @@ async def upload_knowledge_document(
     await db.commit()
     await db.refresh(document)
 
-    index_document(
-        document_id=document.id,
-        filename=document.filename,
-        title=document.title,
-        content=document.content,
-    )
+    try:
+        index_document(
+            document_id=document.id,
+            filename=document.filename,
+            title=document.title,
+            content=document.content,
+        )
+    except Exception as exc:
+        document.status = "error"
+
+        await db.commit()
+        await db.refresh(document)
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Documentul a fost salvat, dar indexarea "
+                "in Qdrant a esuat."
+            ),
+        ) from exc
 
     document.status = "indexed"
 
@@ -476,6 +499,12 @@ async def upload_knowledge_document(
 async def search_knowledge_endpoint(
     query: str,
 ):
+    if not query.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Textul cautarii nu poate fi gol.",
+        )
+
     results = search_knowledge(
         query=query,
         limit=3,
@@ -484,6 +513,59 @@ async def search_knowledge_endpoint(
     return {
         "query": query,
         "results": results,
+    }
+
+
+@app.delete(
+    "/api/knowledge/{document_id}"
+)
+async def delete_knowledge_document(
+    document_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(KnowledgeDocument).where(
+            KnowledgeDocument.id == document_id
+        )
+    )
+
+    document = result.scalar_one_or_none()
+
+    if document is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Documentul nu a fost gasit.",
+        )
+
+    try:
+        delete_document_vectors(
+            document_id=document.id
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Documentul nu a putut fi eliminat "
+                "din indexul Qdrant."
+            ),
+        ) from exc
+
+    file_path = (
+        KNOWLEDGE_DIR
+        / document.filename
+    )
+
+    if file_path.exists():
+        file_path.unlink()
+
+    await db.delete(document)
+    await db.commit()
+
+    return {
+        "status": "sters",
+        "document_id": document_id,
+        "filename": document.filename,
+        "message": "Documentul a fost sters cu succes.",
     }
 
 
@@ -527,7 +609,7 @@ async def create_ticket_from_conversation(
     if conversation is None:
         raise HTTPException(
             status_code=404,
-            detail="Conversation not found.",
+            detail="Conversatia nu a fost gasita.",
         )
 
     existing_ticket_result = await db.execute(
@@ -538,16 +620,14 @@ async def create_ticket_from_conversation(
     )
 
     existing_ticket = (
-        existing_ticket_result
-        .scalar_one_or_none()
+        existing_ticket_result.scalar_one_or_none()
     )
 
     if existing_ticket is not None:
         raise HTTPException(
             status_code=409,
             detail=(
-                "A ticket already exists "
-                "for this conversation."
+                "Exista deja un tichet pentru aceasta conversatie."
             ),
         )
 
@@ -593,7 +673,7 @@ async def update_ticket_status(
     if payload.status not in allowed_statuses:
         raise HTTPException(
             status_code=400,
-            detail="Invalid ticket status.",
+            detail="Statusul tichetului nu este valid.",
         )
 
     result = await db.execute(
@@ -607,7 +687,7 @@ async def update_ticket_status(
     if ticket is None:
         raise HTTPException(
             status_code=404,
-            detail="Ticket not found.",
+            detail="Tichetul nu a fost gasit.",
         )
 
     ticket.status = payload.status
@@ -648,25 +728,19 @@ async def get_dashboard_stats(
         )
     )
 
-    tickets_in_progress_result = (
-        await db.execute(
-            select(func.count())
-            .select_from(Ticket)
-            .where(
-                Ticket.status
-                == "In Progress"
-            )
+    tickets_in_progress_result = await db.execute(
+        select(func.count())
+        .select_from(Ticket)
+        .where(
+            Ticket.status == "In Progress"
         )
     )
 
-    tickets_resolved_result = (
-        await db.execute(
-            select(func.count())
-            .select_from(Ticket)
-            .where(
-                Ticket.status
-                == "Resolved"
-            )
+    tickets_resolved_result = await db.execute(
+        select(func.count())
+        .select_from(Ticket)
+        .where(
+            Ticket.status == "Resolved"
         )
     )
 
@@ -773,3 +847,54 @@ async def get_intent_stats(
         )
         for intent, count in rows
     ]
+@app.post("/api/knowledge/cleanup-duplicates")
+async def cleanup_knowledge_duplicates(
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(KnowledgeDocument).order_by(
+            KnowledgeDocument.id.asc()
+        )
+    )
+
+    documents = result.scalars().all()
+
+    seen_filenames: set[str] = set()
+    removed_documents = []
+
+    for document in documents:
+        if document.filename not in seen_filenames:
+            seen_filenames.add(document.filename)
+            continue
+
+        try:
+            delete_document_vectors(
+                document_id=document.id
+            )
+        except Exception:
+            pass
+
+        file_path = (
+            KNOWLEDGE_DIR
+            / document.filename
+        )
+
+
+        removed_documents.append(
+            {
+                "id": document.id,
+                "filename": document.filename,
+            }
+        )
+
+        await db.delete(document)
+
+    await db.commit()
+
+    return {
+        "status": "ok",
+        "duplicate_sterse": len(
+            removed_documents
+        ),
+        "documente_sterse": removed_documents,
+    }
