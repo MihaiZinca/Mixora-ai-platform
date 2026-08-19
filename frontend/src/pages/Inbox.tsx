@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
 import {
+  Database,
+  FileText,
   Plus,
   RefreshCw,
   RotateCcw,
+  Search,
   Send,
   Sparkles,
   TicketPlus,
@@ -22,16 +25,77 @@ type Conversation = {
 
 type GeneratedReplyResponse = {
   reply: string;
+  source: string | null;
 };
+
+type TicketResponse = {
+  id: number;
+  conversation_id: number;
+  customer_name: string;
+  title: string;
+  summary: string;
+  priority: string;
+  status: string;
+  created_at: string;
+};
+
+type ConversationReply = {
+  id: number;
+  conversation_id: number;
+  content: string;
+  source: string | null;
+  created_at: string;
+};
+
+function translateIntent(intent: string) {
+  const map: Record<string, string> = {
+    "Return request": "Cerere de retur",
+    "Purchase intent": "Intentie de cumparare",
+    "Order status": "Status comanda",
+    "Payment issue": "Problema plata",
+    "General support": "Suport general",
+    Unclassified: "Neclasificat",
+    Unknown: "Necunoscut",
+  };
+
+  return map[intent] ?? intent;
+}
+
+function translateSentiment(sentiment: string) {
+  const map: Record<string, string> = {
+    Positive: "Pozitiv",
+    Neutral: "Neutru",
+    Negative: "Negativ",
+    Unknown: "Necunoscut",
+  };
+
+  return map[sentiment] ?? sentiment;
+}
+
+function translatePriority(priority: string) {
+  const map: Record<string, string> = {
+    High: "Ridicata",
+    Medium: "Medie",
+    Low: "Scazuta",
+    Unknown: "Necunoscuta",
+  };
+
+  return map[priority] ?? priority;
+}
 
 function Inbox() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selected, setSelected] = useState<Conversation | null>(null);
 
+  const [replies, setReplies] = useState<ConversationReply[]>([]);
   const [reply, setReply] = useState("");
+  const [replySource, setReplySource] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(true);
+  const [loadingReplies, setLoadingReplies] = useState(false);
+
   const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
 
   const [showNewConversation, setShowNewConversation] = useState(false);
 
@@ -43,7 +107,13 @@ function Inbox() {
 
   const [creating, setCreating] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [sending, setSending] = useState(false);
   const [reanalyzing, setReanalyzing] = useState(false);
+  const [creatingTicket, setCreatingTicket] = useState(false);
+
+  const [search, setSearch] = useState("");
+  const [intentFilter, setIntentFilter] = useState("All");
+  const [priorityFilter, setPriorityFilter] = useState("All");
 
   const loadConversations = async () => {
     try {
@@ -55,7 +125,7 @@ function Inbox() {
       );
 
       if (!response.ok) {
-        throw new Error("Could not load conversations.");
+        throw new Error("Conversatiile nu au putut fi incarcate.");
       }
 
       const data: Conversation[] = await response.json();
@@ -79,15 +149,55 @@ function Inbox() {
       }
     } catch (err) {
       console.error(err);
-      setError("Could not connect to MIXORA API.");
+
+      setError(
+        "Nu s-a putut realiza conexiunea cu API-ul MIXORA."
+      );
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadReplies = async (conversationId: number) => {
+    try {
+      setLoadingReplies(true);
+      setError("");
+
+      const response = await fetch(
+        `http://localhost:8000/api/conversations/${conversationId}/replies`
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          "Istoricul raspunsurilor nu a putut fi incarcat."
+        );
+      }
+
+      const data: ConversationReply[] = await response.json();
+
+      setReplies(data);
+    } catch (err) {
+      console.error(err);
+
+      setError(
+        "Istoricul raspunsurilor nu a putut fi incarcat."
+      );
+    } finally {
+      setLoadingReplies(false);
     }
   };
 
   useEffect(() => {
     loadConversations();
   }, []);
+
+  useEffect(() => {
+    if (selected) {
+      loadReplies(selected.id);
+    } else {
+      setReplies([]);
+    }
+  }, [selected?.id]);
 
   const createConversation = async () => {
     if (
@@ -101,6 +211,7 @@ function Inbox() {
     try {
       setCreating(true);
       setError("");
+      setSuccessMessage("");
 
       const response = await fetch(
         "http://localhost:8000/api/conversations",
@@ -114,10 +225,13 @@ function Inbox() {
       );
 
       if (!response.ok) {
-        throw new Error("Could not create conversation.");
+        throw new Error(
+          "Conversatia nu a putut fi creata."
+        );
       }
 
-      const created: Conversation = await response.json();
+      const created: Conversation =
+        await response.json();
 
       setConversations((current) => [
         ...current,
@@ -125,7 +239,9 @@ function Inbox() {
       ]);
 
       setSelected(created);
+      setReplies([]);
       setReply("");
+      setReplySource(null);
 
       setNewConversation({
         name: "",
@@ -134,9 +250,16 @@ function Inbox() {
       });
 
       setShowNewConversation(false);
+
+      setSuccessMessage(
+        "Conversatia a fost creata cu succes."
+      );
     } catch (err) {
       console.error(err);
-      setError("Could not create conversation.");
+
+      setError(
+        "Conversatia nu a putut fi creata."
+      );
     } finally {
       setCreating(false);
     }
@@ -150,6 +273,8 @@ function Inbox() {
     try {
       setGenerating(true);
       setError("");
+      setSuccessMessage("");
+      setReplySource(null);
 
       const response = await fetch(
         `http://localhost:8000/api/conversations/${selected.id}/generate-reply`,
@@ -159,17 +284,79 @@ function Inbox() {
       );
 
       if (!response.ok) {
-        throw new Error("Could not generate reply.");
+        throw new Error(
+          "Raspunsul nu a putut fi generat."
+        );
       }
 
-      const data: GeneratedReplyResponse = await response.json();
+      const data: GeneratedReplyResponse =
+        await response.json();
 
       setReply(data.reply);
+      setReplySource(data.source);
     } catch (err) {
       console.error(err);
-      setError("Could not generate AI reply.");
+
+      setError(
+        "MIXORA nu a putut genera raspunsul."
+      );
     } finally {
       setGenerating(false);
+    }
+  };
+
+  const sendReply = async () => {
+    if (!selected || !reply.trim()) {
+      return;
+    }
+
+    try {
+      setSending(true);
+      setError("");
+      setSuccessMessage("");
+
+      const response = await fetch(
+        `http://localhost:8000/api/conversations/${selected.id}/replies`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            content: reply,
+            source: replySource,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          "Raspunsul nu a putut fi trimis."
+        );
+      }
+
+      const createdReply: ConversationReply =
+        await response.json();
+
+      setReplies((current) => [
+        ...current,
+        createdReply,
+      ]);
+
+      setReply("");
+      setReplySource(null);
+
+      setSuccessMessage(
+        "Raspunsul a fost trimis si salvat."
+      );
+    } catch (err) {
+      console.error(err);
+
+      setError(
+        "Raspunsul nu a putut fi trimis."
+      );
+    } finally {
+      setSending(false);
     }
   };
 
@@ -181,6 +368,7 @@ function Inbox() {
     try {
       setReanalyzing(true);
       setError("");
+      setSuccessMessage("");
 
       const response = await fetch(
         `http://localhost:8000/api/conversations/${selected.id}/reanalyze`,
@@ -190,10 +378,13 @@ function Inbox() {
       );
 
       if (!response.ok) {
-        throw new Error("Could not re-analyze conversation.");
+        throw new Error(
+          "Conversatia nu a putut fi reanalizata."
+        );
       }
 
-      const updated: Conversation = await response.json();
+      const updated: Conversation =
+        await response.json();
 
       setSelected(updated);
 
@@ -204,33 +395,143 @@ function Inbox() {
             : conversation
         )
       );
+
+      setReply("");
+      setReplySource(null);
+
+      setSuccessMessage(
+        "Conversatia a fost reanalizata."
+      );
     } catch (err) {
       console.error(err);
-      setError("Could not re-analyze conversation.");
+
+      setError(
+        "Conversatia nu a putut fi reanalizata."
+      );
     } finally {
       setReanalyzing(false);
     }
   };
 
+  const createTicket = async () => {
+    if (!selected) {
+      return;
+    }
+
+    try {
+      setCreatingTicket(true);
+      setError("");
+      setSuccessMessage("");
+
+      const response = await fetch(
+        `http://localhost:8000/api/conversations/${selected.id}/ticket`,
+        {
+          method: "POST",
+        }
+      );
+
+      if (!response.ok) {
+        if (response.status === 409) {
+          setError(
+            "Exista deja un tichet pentru aceasta conversatie."
+          );
+          return;
+        }
+
+        throw new Error(
+          "Tichetul nu a putut fi creat."
+        );
+      }
+
+      const ticket: TicketResponse =
+        await response.json();
+
+      setSuccessMessage(
+        `Tichet #${ticket.id} creat cu succes.`
+      );
+    } catch (err) {
+      console.error(err);
+
+      setError(
+        "Tichetul nu a putut fi creat."
+      );
+    } finally {
+      setCreatingTicket(false);
+    }
+  };
+
+  const selectConversation = (
+    conversation: Conversation
+  ) => {
+    setSelected(conversation);
+    setReply("");
+    setReplySource(null);
+    setError("");
+    setSuccessMessage("");
+  };
+
+  const filteredConversations =
+    conversations.filter((conversation) => {
+      const searchValue =
+        search.toLowerCase().trim();
+
+      const matchesSearch =
+        !searchValue ||
+        conversation.name
+          .toLowerCase()
+          .includes(searchValue) ||
+        conversation.subject
+          .toLowerCase()
+          .includes(searchValue) ||
+        conversation.message
+          .toLowerCase()
+          .includes(searchValue);
+
+      const matchesIntent =
+        intentFilter === "All" ||
+        conversation.intent === intentFilter;
+
+      const matchesPriority =
+        priorityFilter === "All" ||
+        conversation.priority === priorityFilter;
+
+      return (
+        matchesSearch &&
+        matchesIntent &&
+        matchesPriority
+      );
+    });
+
   if (loading) {
     return (
       <div className="pageState">
-        <RefreshCw className="spin" size={24} />
-        <span>Loading conversations...</span>
+        <RefreshCw
+          className="spin"
+          size={24}
+        />
+
+        <span>
+          Se incarca conversatiile...
+        </span>
       </div>
     );
   }
 
-  if (error && conversations.length === 0) {
+  if (
+    error &&
+    conversations.length === 0
+  ) {
     return (
       <div className="pageState">
-        <strong>{error}</strong>
+        <strong>
+          {error}
+        </strong>
 
         <button
           className="primaryButton"
           onClick={loadConversations}
         >
-          Try again
+          Incearca din nou
         </button>
       </div>
     );
@@ -240,114 +541,325 @@ function Inbox() {
     <>
       <header className="header">
         <div>
-          <p className="eyebrow">CUSTOMER SUPPORT</p>
+          <p className="eyebrow">
+            SUPORT CLIENTI
+          </p>
 
-          <h2>Inbox</h2>
+          <h2>
+            Inbox
+          </h2>
 
           <p className="subtitle">
-            Conversations loaded directly from MIXORA API.
+            Conversatii preluate direct din API-ul MIXORA.
           </p>
         </div>
 
         <div className="headerActions">
           <div className="inboxOnline">
             <span className="statusDot" />
-            API Connected
+            API conectat
           </div>
 
           <button
             className="primaryButton"
-            onClick={() => setShowNewConversation(true)}
+            onClick={() =>
+              setShowNewConversation(true)
+            }
           >
             <Plus size={16} />
-            New conversation
+            Conversatie noua
           </button>
         </div>
       </header>
 
       {error && (
         <div
-          style={{
-            marginBottom: "14px",
-            color: "#f87171",
-            fontSize: "12px",
-          }}
+          className="knowledgeError"
         >
           {error}
         </div>
       )}
 
-      {conversations.length === 0 || !selected ? (
+      {successMessage && (
+        <div className="inboxSuccess">
+          {successMessage}
+        </div>
+      )}
+
+      {conversations.length === 0 ||
+      !selected ? (
         <div className="pageState">
-          <strong>No conversations found.</strong>
+          <strong>
+            Nu exista conversatii.
+          </strong>
 
           <button
             className="primaryButton"
-            onClick={() => setShowNewConversation(true)}
+            onClick={() =>
+              setShowNewConversation(true)
+            }
           >
             <Plus size={16} />
-            Create first conversation
+            Creeaza prima conversatie
           </button>
         </div>
       ) : (
         <div className="inboxLayout">
           <section className="conversationList">
             <div className="conversationListHeader">
-              <strong>Conversations</strong>
-              <span>{conversations.length}</span>
+              <strong>
+                Conversatii
+              </strong>
+
+              <span>
+                {filteredConversations.length}/
+                {conversations.length}
+              </span>
             </div>
 
-            {conversations.map((conversation) => (
-              <button
-                key={conversation.id}
-                className={`conversationItem ${
-                  selected.id === conversation.id
-                    ? "selected"
-                    : ""
-                }`}
-                onClick={() => {
-                  setSelected(conversation);
-                  setReply("");
-                }}
+            <div className="inboxFilters">
+              <div className="inboxSearch">
+                <Search size={14} />
+
+                <input
+                  value={search}
+                  onChange={(event) =>
+                    setSearch(
+                      event.target.value
+                    )
+                  }
+                  placeholder="Cauta conversatii..."
+                />
+              </div>
+
+              <select
+                className="inboxFilterSelect"
+                value={intentFilter}
+                onChange={(event) =>
+                  setIntentFilter(
+                    event.target.value
+                  )
+                }
               >
-                <div className="avatar">
-                  {conversation.name.charAt(0).toUpperCase()}
-                </div>
+                <option value="All">
+                  Toate intentiile
+                </option>
 
-                <div className="conversationPreview">
-                  <strong>{conversation.name}</strong>
-                  <span>{conversation.subject}</span>
-                </div>
+                <option value="Return request">
+                  Cerere de retur
+                </option>
 
-                {conversation.priority === "High" && (
-                  <span className="priorityDot" />
-                )}
-              </button>
-            ))}
+                <option value="Purchase intent">
+                  Intentie de cumparare
+                </option>
+
+                <option value="Order status">
+                  Status comanda
+                </option>
+
+                <option value="Payment issue">
+                  Problema plata
+                </option>
+
+                <option value="General support">
+                  Suport general
+                </option>
+
+                <option value="Unclassified">
+                  Neclasificat
+                </option>
+              </select>
+
+              <select
+                className="inboxFilterSelect"
+                value={priorityFilter}
+                onChange={(event) =>
+                  setPriorityFilter(
+                    event.target.value
+                  )
+                }
+              >
+                <option value="All">
+                  Toate prioritatile
+                </option>
+
+                <option value="High">
+                  Ridicata
+                </option>
+
+                <option value="Medium">
+                  Medie
+                </option>
+
+                <option value="Low">
+                  Scazuta
+                </option>
+              </select>
+            </div>
+
+            {filteredConversations.length === 0 ? (
+              <div className="inboxNoResults">
+                <Search size={20} />
+
+                <strong>
+                  Niciun rezultat
+                </strong>
+
+                <span>
+                  Incearca alte filtre sau alta cautare.
+                </span>
+
+                <button
+                  className="secondaryButton"
+                  onClick={() => {
+                    setSearch("");
+                    setIntentFilter("All");
+                    setPriorityFilter("All");
+                  }}
+                >
+                  Reseteaza filtrele
+                </button>
+              </div>
+            ) : (
+              filteredConversations.map(
+                (conversation) => (
+                  <button
+                    key={conversation.id}
+                    className={`conversationItem ${
+                      selected.id ===
+                      conversation.id
+                        ? "selected"
+                        : ""
+                    }`}
+                    onClick={() =>
+                      selectConversation(
+                        conversation
+                      )
+                    }
+                  >
+                    <div className="avatar">
+                      {conversation.name
+                        .charAt(0)
+                        .toUpperCase()}
+                    </div>
+
+                    <div className="conversationPreview">
+                      <strong>
+                        {conversation.name}
+                      </strong>
+
+                      <span>
+                        {conversation.subject}
+                      </span>
+                    </div>
+
+                    {conversation.priority ===
+                      "High" && (
+                      <span className="priorityDot" />
+                    )}
+                  </button>
+                )
+              )
+            )}
           </section>
 
           <section className="chatPanel">
             <div className="chatHeader">
               <div className="avatar">
-                {selected.name.charAt(0).toUpperCase()}
+                {selected.name
+                  .charAt(0)
+                  .toUpperCase()}
               </div>
 
               <div>
-                <strong>{selected.name}</strong>
-                <span>{selected.subject}</span>
+                <strong>
+                  {selected.name}
+                </strong>
+
+                <span>
+                  {selected.subject}
+                </span>
               </div>
             </div>
 
             <div className="messages">
               <div className="message customerMessage">
-                <span>CLIENT</span>
-                <p>{selected.message}</p>
+                <span>
+                  CLIENT
+                </span>
+
+                <p>
+                  {selected.message}
+                </p>
               </div>
+
+              {loadingReplies && (
+                <div className="replyLoading">
+                  <RefreshCw
+                    className="spin"
+                    size={14}
+                  />
+
+                  Se incarca istoricul...
+                </div>
+              )}
+
+              {!loadingReplies &&
+                replies.map(
+                  (savedReply) => (
+                    <div
+                      className="message sentMessage"
+                      key={savedReply.id}
+                    >
+                      <span>
+                        RASPUNS TRIMIS
+                      </span>
+
+                      <p>
+                        {savedReply.content}
+                      </p>
+
+                      <div className="sentReplyMeta">
+                        <span>
+                          {new Date(
+                            savedReply.created_at
+                          ).toLocaleString(
+                            "ro-RO"
+                          )}
+                        </span>
+
+                        {savedReply.source && (
+                          <span>
+                            <FileText
+                              size={12}
+                            />
+
+                            {
+                              savedReply.source
+                            }
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                )}
 
               {reply && (
                 <div className="message aiMessage">
-                  <span>MIXORA AI DRAFT</span>
-                  <p>{reply}</p>
+                  <span>
+                    DRAFT MIXORA AI
+                  </span>
+
+                  <p>
+                    {reply}
+                  </p>
+
+                  {replySource && (
+                    <div className="draftSource">
+                      <FileText size={13} />
+                      Sursa: {replySource}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -356,87 +868,157 @@ function Inbox() {
               <textarea
                 value={reply}
                 onChange={(event) =>
-                  setReply(event.target.value)
+                  setReply(
+                    event.target.value
+                  )
                 }
-                placeholder="Write a reply or generate one with MIXORA..."
+                placeholder="Scrie un raspuns sau genereaza unul cu MIXORA..."
               />
 
               <div className="composerActions">
                 <button
                   className="secondaryButton"
                   onClick={generateReply}
-                  disabled={generating}
+                  disabled={
+                    generating ||
+                    sending
+                  }
                 >
                   {generating ? (
-                    <RefreshCw className="spin" size={16} />
+                    <RefreshCw
+                      className="spin"
+                      size={16}
+                    />
                   ) : (
-                    <Sparkles size={16} />
+                    <Sparkles
+                      size={16}
+                    />
                   )}
 
                   {generating
-                    ? "Generating..."
-                    : "Generate AI"}
+                    ? "Se genereaza..."
+                    : "Genereaza cu AI"}
                 </button>
 
-                <button className="secondaryButton">
-                  <TicketPlus size={16} />
-                  Create Ticket
+                <button
+                  className="secondaryButton"
+                  onClick={createTicket}
+                  disabled={
+                    creatingTicket
+                  }
+                >
+                  {creatingTicket ? (
+                    <RefreshCw
+                      className="spin"
+                      size={16}
+                    />
+                  ) : (
+                    <TicketPlus
+                      size={16}
+                    />
+                  )}
+
+                  {creatingTicket
+                    ? "Se creeaza..."
+                    : "Creeaza tichet"}
                 </button>
 
                 <button
                   className="primaryButton"
-                  disabled={!reply.trim()}
+                  onClick={sendReply}
+                  disabled={
+                    !reply.trim() ||
+                    sending
+                  }
                 >
-                  <Send size={16} />
-                  Send
+                  {sending ? (
+                    <RefreshCw
+                      className="spin"
+                      size={16}
+                    />
+                  ) : (
+                    <Send size={16} />
+                  )}
+
+                  {sending
+                    ? "Se trimite..."
+                    : "Trimite"}
                 </button>
               </div>
             </div>
           </section>
 
           <aside className="analysisPanel">
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                gap: "10px",
-              }}
-            >
-              <p className="eyebrow">AI ANALYSIS</p>
+            <div className="analysisHeader">
+              <p className="eyebrow">
+                ANALIZA AI
+              </p>
 
               <button
                 className="iconButton"
-                onClick={reanalyzeConversation}
-                disabled={reanalyzing}
-                title="Re-analyze conversation"
+                onClick={
+                  reanalyzeConversation
+                }
+                disabled={
+                  reanalyzing
+                }
+                title="Reanalizeaza conversatia"
               >
                 <RotateCcw
-                  className={reanalyzing ? "spin" : ""}
+                  className={
+                    reanalyzing
+                      ? "spin"
+                      : ""
+                  }
                   size={15}
                 />
               </button>
             </div>
 
             <div className="analysisBlock">
-              <span>Intent</span>
-              <strong>{selected.intent}</strong>
+              <span>
+                Intentie
+              </span>
+
+              <strong>
+                {translateIntent(
+                  selected.intent
+                )}
+              </strong>
             </div>
 
             <div className="analysisBlock">
-              <span>Sentiment</span>
-              <strong>{selected.sentiment}</strong>
+              <span>
+                Sentiment
+              </span>
+
+              <strong>
+                {translateSentiment(
+                  selected.sentiment
+                )}
+              </strong>
             </div>
 
             <div className="analysisBlock">
-              <span>Priority</span>
-              <strong>{selected.priority}</strong>
+              <span>
+                Prioritate
+              </span>
+
+              <strong>
+                {translatePriority(
+                  selected.priority
+                )}
+              </strong>
             </div>
 
             <div className="analysisBlock">
-              <span>Confidence</span>
+              <span>
+                Incredere
+              </span>
 
-              <strong>{selected.confidence}%</strong>
+              <strong>
+                {selected.confidence}%
+              </strong>
 
               <div className="progress">
                 <div
@@ -449,15 +1031,51 @@ function Inbox() {
             </div>
 
             <div className="analysisBlock">
-              <span>Data source</span>
+              <span>
+                Sursa date
+              </span>
 
               <strong className="connectedValue">
+                <Database
+                  size={13}
+                />
                 PostgreSQL
               </strong>
             </div>
 
             <div className="analysisBlock">
-              <span>Decision</span>
+              <span>
+                Sursa raspuns
+              </span>
+
+              {replySource ? (
+                <strong className="ragSource">
+                  <FileText
+                    size={13}
+                  />
+                  {replySource}
+                </strong>
+              ) : (
+                <strong className="mutedValue">
+                  Nicio sursa selectata
+                </strong>
+              )}
+            </div>
+
+            <div className="analysisBlock">
+              <span>
+                Raspunsuri trimise
+              </span>
+
+              <strong>
+                {replies.length}
+              </strong>
+            </div>
+
+            <div className="analysisBlock">
+              <span>
+                Decizie
+              </span>
 
               <strong className="draftStatus">
                 DRAFT
@@ -472,14 +1090,21 @@ function Inbox() {
           <div className="modal">
             <div className="modalHeader">
               <div>
-                <p className="eyebrow">NEW</p>
-                <h3>Create conversation</h3>
+                <p className="eyebrow">
+                  NOU
+                </p>
+
+                <h3>
+                  Creeaza conversatie
+                </h3>
               </div>
 
               <button
                 className="iconButton"
                 onClick={() =>
-                  setShowNewConversation(false)
+                  setShowNewConversation(
+                    false
+                  )
                 }
               >
                 <X size={18} />
@@ -487,47 +1112,62 @@ function Inbox() {
             </div>
 
             <div className="formGroup">
-              <label>Customer name</label>
+              <label>
+                Nume client
+              </label>
 
               <input
-                value={newConversation.name}
+                value={
+                  newConversation.name
+                }
                 onChange={(event) =>
                   setNewConversation({
                     ...newConversation,
-                    name: event.target.value,
+                    name:
+                      event.target.value,
                   })
                 }
-                placeholder="Example: Alex Popescu"
+                placeholder="Exemplu: Alex Popescu"
               />
             </div>
 
             <div className="formGroup">
-              <label>Subject</label>
+              <label>
+                Subiect
+              </label>
 
               <input
-                value={newConversation.subject}
+                value={
+                  newConversation.subject
+                }
                 onChange={(event) =>
                   setNewConversation({
                     ...newConversation,
-                    subject: event.target.value,
+                    subject:
+                      event.target.value,
                   })
                 }
-                placeholder="Example: Delivery problem"
+                placeholder="Exemplu: Problema livrare"
               />
             </div>
 
             <div className="formGroup">
-              <label>Message</label>
+              <label>
+                Mesaj
+              </label>
 
               <textarea
-                value={newConversation.message}
+                value={
+                  newConversation.message
+                }
                 onChange={(event) =>
                   setNewConversation({
                     ...newConversation,
-                    message: event.target.value,
+                    message:
+                      event.target.value,
                   })
                 }
-                placeholder="Write the customer message..."
+                placeholder="Scrie mesajul clientului..."
               />
             </div>
 
@@ -535,15 +1175,19 @@ function Inbox() {
               <button
                 className="secondaryButton"
                 onClick={() =>
-                  setShowNewConversation(false)
+                  setShowNewConversation(
+                    false
+                  )
                 }
               >
-                Cancel
+                Anuleaza
               </button>
 
               <button
                 className="primaryButton"
-                onClick={createConversation}
+                onClick={
+                  createConversation
+                }
                 disabled={
                   creating ||
                   !newConversation.name.trim() ||
@@ -552,8 +1196,8 @@ function Inbox() {
                 }
               >
                 {creating
-                  ? "Creating..."
-                  : "Create conversation"}
+                  ? "Se creeaza..."
+                  : "Creeaza conversatia"}
               </button>
             </div>
           </div>

@@ -26,7 +26,7 @@ function App() {
 
           <div>
             <h1>MIXORA</h1>
-            <span>AI Customer Ops</span>
+            <span>Operatiuni AI pentru clienti</span>
           </div>
         </div>
 
@@ -49,7 +49,6 @@ function App() {
           >
             <Inbox size={19} />
             Inbox
-            <span className="badge">3</span>
           </NavLink>
 
           <NavLink
@@ -69,7 +68,7 @@ function App() {
             }
           >
             <BookOpen size={19} />
-            Knowledge
+            Knowledge Base
           </NavLink>
         </nav>
 
@@ -81,7 +80,7 @@ function App() {
 
           <div className="systemStatus">
             <span className="statusDot" />
-            MIXORA Online
+            MIXORA activ
           </div>
         </div>
       </aside>
