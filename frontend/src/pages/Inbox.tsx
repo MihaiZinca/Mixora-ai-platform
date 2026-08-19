@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  Bot,
   Database,
   FileText,
   Plus,
@@ -44,7 +45,14 @@ type ConversationReply = {
   conversation_id: number;
   content: string;
   source: string | null;
+  reply_type: "manual" | "automatic";
   created_at: string;
+};
+
+type ResponseMode = "draft" | "auto";
+
+type ResponseModeResponse = {
+  mode: ResponseMode;
 };
 
 function translateIntent(intent: string) {
@@ -84,36 +92,85 @@ function translatePriority(priority: string) {
 }
 
 function Inbox() {
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [selected, setSelected] = useState<Conversation | null>(null);
+  const [conversations, setConversations] =
+    useState<Conversation[]>([]);
 
-  const [replies, setReplies] = useState<ConversationReply[]>([]);
+  const [selected, setSelected] =
+    useState<Conversation | null>(null);
+
+  const [replies, setReplies] =
+    useState<ConversationReply[]>([]);
+
   const [reply, setReply] = useState("");
-  const [replySource, setReplySource] = useState<string | null>(null);
+
+  const [replySource, setReplySource] =
+    useState<string | null>(null);
+
+  const [responseMode, setResponseMode] =
+    useState<ResponseMode>("draft");
 
   const [loading, setLoading] = useState(true);
-  const [loadingReplies, setLoadingReplies] = useState(false);
+
+  const [loadingReplies, setLoadingReplies] =
+    useState(false);
 
   const [error, setError] = useState("");
-  const [successMessage, setSuccessMessage] = useState("");
 
-  const [showNewConversation, setShowNewConversation] = useState(false);
+  const [successMessage, setSuccessMessage] =
+    useState("");
 
-  const [newConversation, setNewConversation] = useState({
-    name: "",
-    subject: "",
-    message: "",
-  });
+  const [showNewConversation, setShowNewConversation] =
+    useState(false);
 
-  const [creating, setCreating] = useState(false);
-  const [generating, setGenerating] = useState(false);
-  const [sending, setSending] = useState(false);
-  const [reanalyzing, setReanalyzing] = useState(false);
-  const [creatingTicket, setCreatingTicket] = useState(false);
+  const [newConversation, setNewConversation] =
+    useState({
+      name: "",
+      subject: "",
+      message: "",
+    });
 
-  const [search, setSearch] = useState("");
-  const [intentFilter, setIntentFilter] = useState("All");
-  const [priorityFilter, setPriorityFilter] = useState("All");
+  const [creating, setCreating] =
+    useState(false);
+
+  const [generating, setGenerating] =
+    useState(false);
+
+  const [sending, setSending] =
+    useState(false);
+
+  const [reanalyzing, setReanalyzing] =
+    useState(false);
+
+  const [creatingTicket, setCreatingTicket] =
+    useState(false);
+
+  const [search, setSearch] =
+    useState("");
+
+  const [intentFilter, setIntentFilter] =
+    useState("All");
+
+  const [priorityFilter, setPriorityFilter] =
+    useState("All");
+
+  const loadResponseMode = async () => {
+    try {
+      const response = await fetch(
+        "http://localhost:8000/api/settings/response-mode"
+      );
+
+      if (!response.ok) {
+        return;
+      }
+
+      const data: ResponseModeResponse =
+        await response.json();
+
+      setResponseMode(data.mode);
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   const loadConversations = async () => {
     try {
@@ -125,10 +182,13 @@ function Inbox() {
       );
 
       if (!response.ok) {
-        throw new Error("Conversatiile nu au putut fi incarcate.");
+        throw new Error(
+          "Conversatiile nu au putut fi incarcate."
+        );
       }
 
-      const data: Conversation[] = await response.json();
+      const data: Conversation[] =
+        await response.json();
 
       setConversations(data);
 
@@ -138,11 +198,16 @@ function Inbox() {
             return data[0];
           }
 
-          const existingConversation = data.find(
-            (conversation) => conversation.id === current.id
-          );
+          const existingConversation =
+            data.find(
+              (conversation) =>
+                conversation.id === current.id
+            );
 
-          return existingConversation ?? data[0];
+          return (
+            existingConversation ??
+            data[0]
+          );
         });
       } else {
         setSelected(null);
@@ -158,7 +223,9 @@ function Inbox() {
     }
   };
 
-  const loadReplies = async (conversationId: number) => {
+  const loadReplies = async (
+    conversationId: number
+  ) => {
     try {
       setLoadingReplies(true);
       setError("");
@@ -173,7 +240,8 @@ function Inbox() {
         );
       }
 
-      const data: ConversationReply[] = await response.json();
+      const data: ConversationReply[] =
+        await response.json();
 
       setReplies(data);
     } catch (err) {
@@ -188,7 +256,10 @@ function Inbox() {
   };
 
   useEffect(() => {
-    loadConversations();
+    Promise.all([
+      loadConversations(),
+      loadResponseMode(),
+    ]);
   }, []);
 
   useEffect(() => {
@@ -218,9 +289,12 @@ function Inbox() {
         {
           method: "POST",
           headers: {
-            "Content-Type": "application/json",
+            "Content-Type":
+              "application/json",
           },
-          body: JSON.stringify(newConversation),
+          body: JSON.stringify(
+            newConversation
+          ),
         }
       );
 
@@ -239,7 +313,7 @@ function Inbox() {
       ]);
 
       setSelected(created);
-      setReplies([]);
+
       setReply("");
       setReplySource(null);
 
@@ -251,9 +325,28 @@ function Inbox() {
 
       setShowNewConversation(false);
 
-      setSuccessMessage(
-        "Conversatia a fost creata cu succes."
-      );
+      if (
+        responseMode === "auto" &&
+        created.confidence >= 90
+      ) {
+        setSuccessMessage(
+          "Conversatia a fost creata. MIXORA a generat automat un raspuns."
+        );
+
+        setTimeout(() => {
+          loadReplies(created.id);
+        }, 500);
+      } else if (
+        responseMode === "auto"
+      ) {
+        setSuccessMessage(
+          "Conversatia a fost creata, dar necesita verificare manuala deoarece increderea AI este sub 90%."
+        );
+      } else {
+        setSuccessMessage(
+          "Conversatia a fost creata cu succes."
+        );
+      }
     } catch (err) {
       console.error(err);
 
@@ -306,7 +399,10 @@ function Inbox() {
   };
 
   const sendReply = async () => {
-    if (!selected || !reply.trim()) {
+    if (
+      !selected ||
+      !reply.trim()
+    ) {
       return;
     }
 
@@ -320,7 +416,8 @@ function Inbox() {
         {
           method: "POST",
           headers: {
-            "Content-Type": "application/json",
+            "Content-Type":
+              "application/json",
           },
           body: JSON.stringify({
             content: reply,
@@ -335,7 +432,8 @@ function Inbox() {
         );
       }
 
-      const createdReply: ConversationReply =
+      const createdReply:
+        ConversationReply =
         await response.json();
 
       setReplies((current) => [
@@ -360,58 +458,62 @@ function Inbox() {
     }
   };
 
-  const reanalyzeConversation = async () => {
-    if (!selected) {
-      return;
-    }
-
-    try {
-      setReanalyzing(true);
-      setError("");
-      setSuccessMessage("");
-
-      const response = await fetch(
-        `http://localhost:8000/api/conversations/${selected.id}/reanalyze`,
-        {
-          method: "POST",
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(
-          "Conversatia nu a putut fi reanalizata."
-        );
+  const reanalyzeConversation =
+    async () => {
+      if (!selected) {
+        return;
       }
 
-      const updated: Conversation =
-        await response.json();
+      try {
+        setReanalyzing(true);
+        setError("");
+        setSuccessMessage("");
 
-      setSelected(updated);
+        const response = await fetch(
+          `http://localhost:8000/api/conversations/${selected.id}/reanalyze`,
+          {
+            method: "POST",
+          }
+        );
 
-      setConversations((current) =>
-        current.map((conversation) =>
-          conversation.id === updated.id
-            ? updated
-            : conversation
-        )
-      );
+        if (!response.ok) {
+          throw new Error(
+            "Conversatia nu a putut fi reanalizata."
+          );
+        }
 
-      setReply("");
-      setReplySource(null);
+        const updated: Conversation =
+          await response.json();
 
-      setSuccessMessage(
-        "Conversatia a fost reanalizata."
-      );
-    } catch (err) {
-      console.error(err);
+        setSelected(updated);
 
-      setError(
-        "Conversatia nu a putut fi reanalizata."
-      );
-    } finally {
-      setReanalyzing(false);
-    }
-  };
+        setConversations(
+          (current) =>
+            current.map(
+              (conversation) =>
+                conversation.id ===
+                updated.id
+                  ? updated
+                  : conversation
+            )
+        );
+
+        setReply("");
+        setReplySource(null);
+
+        setSuccessMessage(
+          "Conversatia a fost reanalizata."
+        );
+      } catch (err) {
+        console.error(err);
+
+        setError(
+          "Conversatia nu a putut fi reanalizata."
+        );
+      } finally {
+        setReanalyzing(false);
+      }
+    };
 
   const createTicket = async () => {
     if (!selected) {
@@ -431,10 +533,13 @@ function Inbox() {
       );
 
       if (!response.ok) {
-        if (response.status === 409) {
+        if (
+          response.status === 409
+        ) {
           setError(
             "Exista deja un tichet pentru aceasta conversatie."
           );
+
           return;
         }
 
@@ -443,7 +548,8 @@ function Inbox() {
         );
       }
 
-      const ticket: TicketResponse =
+      const ticket:
+        TicketResponse =
         await response.json();
 
       setSuccessMessage(
@@ -464,43 +570,52 @@ function Inbox() {
     conversation: Conversation
   ) => {
     setSelected(conversation);
+
     setReply("");
     setReplySource(null);
     setError("");
     setSuccessMessage("");
+
+    loadResponseMode();
   };
 
   const filteredConversations =
-    conversations.filter((conversation) => {
-      const searchValue =
-        search.toLowerCase().trim();
+    conversations.filter(
+      (conversation) => {
+        const searchValue =
+          search
+            .toLowerCase()
+            .trim();
 
-      const matchesSearch =
-        !searchValue ||
-        conversation.name
-          .toLowerCase()
-          .includes(searchValue) ||
-        conversation.subject
-          .toLowerCase()
-          .includes(searchValue) ||
-        conversation.message
-          .toLowerCase()
-          .includes(searchValue);
+        const matchesSearch =
+          !searchValue ||
+          conversation.name
+            .toLowerCase()
+            .includes(searchValue) ||
+          conversation.subject
+            .toLowerCase()
+            .includes(searchValue) ||
+          conversation.message
+            .toLowerCase()
+            .includes(searchValue);
 
-      const matchesIntent =
-        intentFilter === "All" ||
-        conversation.intent === intentFilter;
+        const matchesIntent =
+          intentFilter === "All" ||
+          conversation.intent ===
+            intentFilter;
 
-      const matchesPriority =
-        priorityFilter === "All" ||
-        conversation.priority === priorityFilter;
+        const matchesPriority =
+          priorityFilter === "All" ||
+          conversation.priority ===
+            priorityFilter;
 
-      return (
-        matchesSearch &&
-        matchesIntent &&
-        matchesPriority
-      );
-    });
+        return (
+          matchesSearch &&
+          matchesIntent &&
+          matchesPriority
+        );
+      }
+    );
 
   if (loading) {
     return (
@@ -529,7 +644,9 @@ function Inbox() {
 
         <button
           className="primaryButton"
-          onClick={loadConversations}
+          onClick={
+            loadConversations
+          }
         >
           Incearca din nou
         </button>
@@ -542,7 +659,7 @@ function Inbox() {
       <header className="header">
         <div>
           <p className="eyebrow">
-            SUPORT CLIENTI
+            CUSTOMER SUPPORT
           </p>
 
           <h2>
@@ -550,11 +667,35 @@ function Inbox() {
           </h2>
 
           <p className="subtitle">
-            Conversatii preluate direct din API-ul MIXORA.
+            Conversatii preluate direct
+            din API-ul MIXORA.
           </p>
         </div>
 
         <div className="headerActions">
+          <div
+            className={`aiModeBadge ${
+              responseMode === "auto"
+                ? "aiModeAuto"
+                : "aiModeDraft"
+            }`}
+          >
+            <Bot size={14} />
+
+            <div>
+              <span>
+                MOD AI
+              </span>
+
+              <strong>
+                {responseMode ===
+                "auto"
+                  ? "AUTO REPLY"
+                  : "DRAFT"}
+              </strong>
+            </div>
+          </div>
+
           <div className="inboxOnline">
             <span className="statusDot" />
             API conectat
@@ -563,7 +704,9 @@ function Inbox() {
           <button
             className="primaryButton"
             onClick={() =>
-              setShowNewConversation(true)
+              setShowNewConversation(
+                true
+              )
             }
           >
             <Plus size={16} />
@@ -573,9 +716,7 @@ function Inbox() {
       </header>
 
       {error && (
-        <div
-          className="knowledgeError"
-        >
+        <div className="knowledgeError">
           {error}
         </div>
       )}
@@ -596,7 +737,9 @@ function Inbox() {
           <button
             className="primaryButton"
             onClick={() =>
-              setShowNewConversation(true)
+              setShowNewConversation(
+                true
+              )
             }
           >
             <Plus size={16} />
@@ -612,8 +755,13 @@ function Inbox() {
               </strong>
 
               <span>
-                {filteredConversations.length}/
-                {conversations.length}
+                {
+                  filteredConversations.length
+                }
+                /
+                {
+                  conversations.length
+                }
               </span>
             </div>
 
@@ -697,7 +845,8 @@ function Inbox() {
               </select>
             </div>
 
-            {filteredConversations.length === 0 ? (
+            {filteredConversations.length ===
+            0 ? (
               <div className="inboxNoResults">
                 <Search size={20} />
 
@@ -706,15 +855,20 @@ function Inbox() {
                 </strong>
 
                 <span>
-                  Incearca alte filtre sau alta cautare.
+                  Incearca alte filtre
+                  sau alta cautare.
                 </span>
 
                 <button
                   className="secondaryButton"
                   onClick={() => {
                     setSearch("");
-                    setIntentFilter("All");
-                    setPriorityFilter("All");
+                    setIntentFilter(
+                      "All"
+                    );
+                    setPriorityFilter(
+                      "All"
+                    );
                   }}
                 >
                   Reseteaza filtrele
@@ -724,7 +878,9 @@ function Inbox() {
               filteredConversations.map(
                 (conversation) => (
                   <button
-                    key={conversation.id}
+                    key={
+                      conversation.id
+                    }
                     className={`conversationItem ${
                       selected.id ===
                       conversation.id
@@ -745,11 +901,15 @@ function Inbox() {
 
                     <div className="conversationPreview">
                       <strong>
-                        {conversation.name}
+                        {
+                          conversation.name
+                        }
                       </strong>
 
                       <span>
-                        {conversation.subject}
+                        {
+                          conversation.subject
+                        }
                       </span>
                     </div>
 
@@ -808,15 +968,34 @@ function Inbox() {
                 replies.map(
                   (savedReply) => (
                     <div
-                      className="message sentMessage"
-                      key={savedReply.id}
+                      className={`message sentMessage ${
+                        savedReply.reply_type ===
+                        "automatic"
+                          ? "automaticMessage"
+                          : ""
+                      }`}
+                      key={
+                        savedReply.id
+                      }
                     >
-                      <span>
-                        RASPUNS TRIMIS
+                      <span
+                        className={
+                          savedReply.reply_type ===
+                          "automatic"
+                            ? "automaticReplyLabel"
+                            : ""
+                        }
+                      >
+                        {savedReply.reply_type ===
+                        "automatic"
+                          ? "RASPUNS AUTOMAT MIXORA"
+                          : "RASPUNS TRIMIS"}
                       </span>
 
                       <p>
-                        {savedReply.content}
+                        {
+                          savedReply.content
+                        }
                       </p>
 
                       <div className="sentReplyMeta">
@@ -856,8 +1035,12 @@ function Inbox() {
 
                   {replySource && (
                     <div className="draftSource">
-                      <FileText size={13} />
-                      Sursa: {replySource}
+                      <FileText
+                        size={13}
+                      />
+
+                      Sursa:{" "}
+                      {replySource}
                     </div>
                   )}
                 </div>
@@ -878,7 +1061,9 @@ function Inbox() {
               <div className="composerActions">
                 <button
                   className="secondaryButton"
-                  onClick={generateReply}
+                  onClick={
+                    generateReply
+                  }
                   disabled={
                     generating ||
                     sending
@@ -902,7 +1087,9 @@ function Inbox() {
 
                 <button
                   className="secondaryButton"
-                  onClick={createTicket}
+                  onClick={
+                    createTicket
+                  }
                   disabled={
                     creatingTicket
                   }
@@ -937,7 +1124,9 @@ function Inbox() {
                       size={16}
                     />
                   ) : (
-                    <Send size={16} />
+                    <Send
+                      size={16}
+                    />
                   )}
 
                   {sending
@@ -951,7 +1140,7 @@ function Inbox() {
           <aside className="analysisPanel">
             <div className="analysisHeader">
               <p className="eyebrow">
-                ANALIZA AI
+                AI ANALYSIS
               </p>
 
               <button
@@ -1017,7 +1206,10 @@ function Inbox() {
               </span>
 
               <strong>
-                {selected.confidence}%
+                {
+                  selected.confidence
+                }
+                %
               </strong>
 
               <div className="progress">
@@ -1032,6 +1224,26 @@ function Inbox() {
 
             <div className="analysisBlock">
               <span>
+                Mod AI
+              </span>
+
+              <strong
+                className={
+                  responseMode ===
+                  "auto"
+                    ? "autoModeValue"
+                    : "draftModeValue"
+                }
+              >
+                {responseMode ===
+                "auto"
+                  ? "AUTO REPLY"
+                  : "DRAFT"}
+              </strong>
+            </div>
+
+            <div className="analysisBlock">
+              <span>
                 Sursa date
               </span>
 
@@ -1039,6 +1251,7 @@ function Inbox() {
                 <Database
                   size={13}
                 />
+
                 PostgreSQL
               </strong>
             </div>
@@ -1053,6 +1266,7 @@ function Inbox() {
                   <FileText
                     size={13}
                   />
+
                   {replySource}
                 </strong>
               ) : (
@@ -1077,8 +1291,18 @@ function Inbox() {
                 Decizie
               </span>
 
-              <strong className="draftStatus">
-                DRAFT
+              <strong
+                className={
+                  responseMode ===
+                  "auto"
+                    ? "autoModeValue"
+                    : "draftStatus"
+                }
+              >
+                {responseMode ===
+                "auto"
+                  ? "AUTOMAT"
+                  : "DRAFT"}
               </strong>
             </div>
           </aside>

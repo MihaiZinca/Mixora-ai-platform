@@ -99,6 +99,7 @@ class ReplyResponse(BaseModel):
     conversation_id: int
     content: str
     source: str | None
+    reply_type: str
     created_at: datetime
 
     model_config = ConfigDict(

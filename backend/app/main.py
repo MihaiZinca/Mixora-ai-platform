@@ -43,10 +43,10 @@ from app.schemas import (
     RecentConversationResponse,
     ReplyCreate,
     ReplyResponse,
-    TicketResponse,
-    TicketStatusUpdate,
     ResponseModeResponse,
     ResponseModeUpdate,
+    TicketResponse,
+    TicketStatusUpdate,
 )
 
 
@@ -132,6 +132,82 @@ async def get_system_status(
 
 
 @app.get(
+    "/api/settings/response-mode",
+    response_model=ResponseModeResponse,
+)
+async def get_response_mode(
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(AppSetting).where(
+            AppSetting.key == "response_mode"
+        )
+    )
+
+    setting = result.scalar_one_or_none()
+
+    if setting is None:
+        setting = AppSetting(
+            key="response_mode",
+            value="draft",
+        )
+
+        db.add(setting)
+
+        await db.commit()
+        await db.refresh(setting)
+
+    return ResponseModeResponse(
+        mode=setting.value,
+    )
+
+
+@app.put(
+    "/api/settings/response-mode",
+    response_model=ResponseModeResponse,
+)
+async def update_response_mode(
+    payload: ResponseModeUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    allowed_modes = {
+        "draft",
+        "auto",
+    }
+
+    if payload.mode not in allowed_modes:
+        raise HTTPException(
+            status_code=400,
+            detail="Modul de raspuns nu este valid.",
+        )
+
+    result = await db.execute(
+        select(AppSetting).where(
+            AppSetting.key == "response_mode"
+        )
+    )
+
+    setting = result.scalar_one_or_none()
+
+    if setting is None:
+        setting = AppSetting(
+            key="response_mode",
+            value=payload.mode,
+        )
+
+        db.add(setting)
+    else:
+        setting.value = payload.mode
+
+    await db.commit()
+    await db.refresh(setting)
+
+    return ResponseModeResponse(
+        mode=setting.value,
+    )
+
+
+@app.get(
     "/api/conversations",
     response_model=list[ConversationResponse],
 )
@@ -173,6 +249,66 @@ async def create_conversation(
 
     await db.commit()
     await db.refresh(conversation)
+
+    settings_result = await db.execute(
+        select(AppSetting).where(
+            AppSetting.key == "response_mode"
+        )
+    )
+
+    response_mode_setting = (
+        settings_result.scalar_one_or_none()
+    )
+
+    response_mode = (
+        response_mode_setting.value
+        if response_mode_setting
+        else "draft"
+    )
+
+    auto_reply_min_confidence = 90
+
+    if (
+        response_mode == "auto"
+        and conversation.confidence
+        >= auto_reply_min_confidence
+    ):
+        search_results = search_knowledge(
+            query=conversation.message,
+            limit=3,
+        )
+
+        knowledge_context = None
+        knowledge_source = None
+
+        if search_results:
+            best_result = search_results[0]
+
+            knowledge_context = best_result.get(
+                "text"
+            )
+
+            knowledge_source = best_result.get(
+                "filename"
+            )
+
+        generated_reply = generate_reply(
+            customer_name=conversation.name,
+            intent=conversation.intent,
+            message=conversation.message,
+            knowledge_context=knowledge_context,
+        )
+
+        automatic_reply = ConversationReply(
+            conversation_id=conversation.id,
+            content=generated_reply,
+            source=knowledge_source,
+            reply_type="automatic",
+        )
+
+        db.add(automatic_reply)
+
+        await db.commit()
 
     return conversation
 
@@ -343,6 +479,7 @@ async def send_conversation_reply(
         conversation_id=conversation_id,
         content=content,
         source=payload.source,
+        reply_type="manual",
     )
 
     db.add(reply)
@@ -893,152 +1030,3 @@ async def get_intent_stats(
         )
         for intent, count in rows
     ]
-
-@app.get(
-    "/api/settings/response-mode",
-    response_model=ResponseModeResponse,
-)
-async def get_response_mode(
-    db: AsyncSession = Depends(get_db),
-):
-    result = await db.execute(
-        select(AppSetting).where(
-            AppSetting.key == "response_mode"
-        )
-    )
-
-    setting = result.scalar_one_or_none()
-
-    if setting is None:
-        setting = AppSetting(
-            key="response_mode",
-            value="draft",
-        )
-
-        db.add(setting)
-
-        await db.commit()
-        await db.refresh(setting)
-
-    return ResponseModeResponse(
-        mode=setting.value,
-    )
-
-
-@app.put(
-    "/api/settings/response-mode",
-    response_model=ResponseModeResponse,
-)
-async def update_response_mode(
-    payload: ResponseModeUpdate,
-    db: AsyncSession = Depends(get_db),
-):
-    allowed_modes = {
-        "draft",
-        "auto",
-    }
-
-    if payload.mode not in allowed_modes:
-        raise HTTPException(
-            status_code=400,
-            detail="Modul de raspuns nu este valid.",
-        )
-
-    result = await db.execute(
-        select(AppSetting).where(
-            AppSetting.key == "response_mode"
-        )
-    )
-
-    setting = result.scalar_one_or_none()
-
-    if setting is None:
-        setting = AppSetting(
-            key="response_mode",
-            value=payload.mode,
-        )
-
-        db.add(setting)
-    else:
-        setting.value = payload.mode
-
-    await db.commit()
-    await db.refresh(setting)
-
-    return ResponseModeResponse(
-        mode=setting.value,
-    )
-@app.get(
-    "/api/settings/response-mode",
-    response_model=ResponseModeResponse,
-)
-async def get_response_mode(
-    db: AsyncSession = Depends(get_db),
-):
-    result = await db.execute(
-        select(AppSetting).where(
-            AppSetting.key == "response_mode"
-        )
-    )
-
-    setting = result.scalar_one_or_none()
-
-    if setting is None:
-        setting = AppSetting(
-            key="response_mode",
-            value="draft",
-        )
-
-        db.add(setting)
-
-        await db.commit()
-        await db.refresh(setting)
-
-    return ResponseModeResponse(
-        mode=setting.value,
-    )
-
-
-@app.put(
-    "/api/settings/response-mode",
-    response_model=ResponseModeResponse,
-)
-async def update_response_mode(
-    payload: ResponseModeUpdate,
-    db: AsyncSession = Depends(get_db),
-):
-    allowed_modes = {
-        "draft",
-        "auto",
-    }
-
-    if payload.mode not in allowed_modes:
-        raise HTTPException(
-            status_code=400,
-            detail="Modul de raspuns nu este valid.",
-        )
-
-    result = await db.execute(
-        select(AppSetting).where(
-            AppSetting.key == "response_mode"
-        )
-    )
-
-    setting = result.scalar_one_or_none()
-
-    if setting is None:
-        setting = AppSetting(
-            key="response_mode",
-            value=payload.mode,
-        )
-
-        db.add(setting)
-    else:
-        setting.value = payload.mode
-
-    await db.commit()
-    await db.refresh(setting)
-
-    return ResponseModeResponse(
-        mode=setting.value,
-    )

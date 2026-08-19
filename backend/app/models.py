@@ -166,6 +166,12 @@ class ConversationReply(Base):
         nullable=True,
     )
 
+    reply_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="manual",
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.utcnow,
