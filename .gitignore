@@ -1,42 +1,58 @@
-# Environment
+# Environment variables
 .env
 .env.*
 !.env.example
+backend/.env
+frontend/.env
 
 # Python
 __pycache__/
 *.py[cod]
-.pytest_cache/
+*$py.class
+*.so
+.Python
 .venv/
 venv/
-
-# Node
-node_modules/
-dist/
-build/
-.next/
-
-# IDE
-.vscode/
-.idea/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
-logs/
-
-# Database / local data
-postgres_data/
-redis_data/
-qdrant_data/
-
-# Coverage
+env/
+ENV/
+backend/.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .coverage
 htmlcov/
 
-# Secrets
-*.pem
-*.key
+# Node / Frontend
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+dist-ssr/
+*.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Uploaded / generated local files
+backend/knowledge_files/
+
+# IDE / Editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Operating system
+Thumbs.db
+desktop.ini

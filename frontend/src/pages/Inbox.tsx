@@ -3,6 +3,7 @@ import {
   Bot,
   Database,
   FileText,
+  Globe2,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -22,6 +23,9 @@ type Conversation = {
   priority: string;
   sentiment: string;
   confidence: number;
+  channel: string;
+  external_id: string | null;
+  customer_contact: string | null;
 };
 
 type GeneratedReplyResponse = {
@@ -136,6 +140,50 @@ function translatePriority(priority: string) {
   return map[priority] ?? priority;
 }
 
+function normalizeChannel(channel?: string) {
+  return (
+    channel?.toLowerCase().trim() ||
+    "web"
+  );
+}
+
+function translateChannel(channel?: string) {
+  const normalized =
+    normalizeChannel(channel);
+
+  const map: Record<string, string> = {
+    web: "Web",
+    email: "Email",
+  };
+
+  return (
+    map[normalized] ??
+    normalized
+  );
+}
+
+function getChannelClass(channel?: string) {
+  const normalized =
+    normalizeChannel(channel);
+
+  if (normalized === "email") {
+    return "channelEmail";
+  }
+
+  return "channelWeb";
+}
+
+function ChannelIcon({
+  size = 12,
+}: {
+  channel?: string;
+  size?: number;
+}) {
+  return (
+    <Globe2 size={size} />
+  );
+}
+
 function Inbox() {
   const [conversations, setConversations] =
     useState<Conversation[]>([]);
@@ -202,6 +250,9 @@ function Inbox() {
     useState("All");
 
   const [priorityFilter, setPriorityFilter] =
+    useState("All");
+
+  const [channelFilter, setChannelFilter] =
     useState("All");
 
   const loadResponseMode = async () => {
@@ -378,6 +429,9 @@ function Inbox() {
             name: newConversation.name.trim(),
             subject: newConversation.subject.trim(),
             message: newConversation.message.trim(),
+            channel: "web",
+            external_id: null,
+            customer_contact: null,
           }),
         }
       );
@@ -711,7 +765,13 @@ function Inbox() {
             .includes(searchValue) ||
           conversation.message
             .toLowerCase()
-            .includes(searchValue);
+            .includes(searchValue) ||
+          (conversation.customer_contact ?? "")
+            .toLowerCase()
+            .includes(searchValue) ||
+          normalizeChannel(
+            conversation.channel
+          ).includes(searchValue);
 
         const matchesIntent =
           intentFilter === "All" ||
@@ -723,10 +783,17 @@ function Inbox() {
           conversation.priority ===
             priorityFilter;
 
+        const matchesChannel =
+          channelFilter === "All" ||
+          normalizeChannel(
+            conversation.channel
+          ) === channelFilter;
+
         return (
           matchesSearch &&
           matchesIntent &&
-          matchesPriority
+          matchesPriority &&
+          matchesChannel
         );
       }
     );
@@ -781,8 +848,7 @@ function Inbox() {
           </h2>
 
           <p className="subtitle">
-            Conversatii preluate direct
-            din API-ul MIXORA.
+            Conversatii centralizate din Web si canalele MIXORA.
           </p>
         </div>
 
@@ -959,6 +1025,28 @@ function Inbox() {
                   Scazuta
                 </option>
               </select>
+
+              <select
+                className="inboxFilterSelect"
+                value={channelFilter}
+                onChange={(event) =>
+                  setChannelFilter(
+                    event.target.value
+                  )
+                }
+              >
+                <option value="All">
+                  Toate canalele
+                </option>
+
+                <option value="web">
+                  Web
+                </option>
+
+                <option value="email">
+                  Email
+                </option>
+              </select>
             </div>
 
             {filteredConversations.length ===
@@ -983,6 +1071,9 @@ function Inbox() {
                       "All"
                     );
                     setPriorityFilter(
+                      "All"
+                    );
+                    setChannelFilter(
                       "All"
                     );
                   }}
@@ -1016,17 +1107,44 @@ function Inbox() {
                     </div>
 
                     <div className="conversationPreview">
-                      <strong>
-                        {
-                          conversation.name
-                        }
-                      </strong>
+                      <div className="conversationPreviewTop">
+                        <strong>
+                          {
+                            conversation.name
+                          }
+                        </strong>
+
+                        <span
+                          className={`channelBadge ${getChannelClass(
+                            conversation.channel
+                          )}`}
+                        >
+                          <ChannelIcon
+                            channel={
+                              conversation.channel
+                            }
+                            size={10}
+                          />
+
+                          {translateChannel(
+                            conversation.channel
+                          )}
+                        </span>
+                      </div>
 
                       <span>
                         {
                           conversation.subject
                         }
                       </span>
+
+                      {conversation.customer_contact && (
+                        <small className="conversationContact">
+                          {
+                            conversation.customer_contact
+                          }
+                        </small>
+                      )}
                     </div>
 
                     {conversation.priority ===
@@ -1047,21 +1165,48 @@ function Inbox() {
                   .toUpperCase()}
               </div>
 
-              <div>
-                <strong>
-                  {selected.name}
-                </strong>
+              <div className="chatHeaderInfo">
+                <div className="chatHeaderTop">
+                  <strong>
+                    {selected.name}
+                  </strong>
+
+                  <span
+                    className={`channelBadge ${getChannelClass(
+                      selected.channel
+                    )}`}
+                  >
+                    <ChannelIcon
+                      channel={
+                        selected.channel
+                      }
+                      size={10}
+                    />
+
+                    {translateChannel(
+                      selected.channel
+                    )}
+                  </span>
+                </div>
 
                 <span>
                   {selected.subject}
                 </span>
+
+                {selected.customer_contact && (
+                  <small className="chatContact">
+                    Contact: {selected.customer_contact}
+                  </small>
+                )}
               </div>
             </div>
 
             <div className="messages">
               <div className="message customerMessage">
                 <span>
-                  CLIENT
+                  CLIENT · {translateChannel(
+                    selected.channel
+                  ).toUpperCase()}
                 </span>
 
                 <p>
@@ -1378,6 +1523,46 @@ function Inbox() {
 
             <div className="analysisBlock">
               <span>
+                Canal
+              </span>
+
+              <strong
+                className={`analysisChannel ${getChannelClass(
+                  selected.channel
+                )}`}
+              >
+                <ChannelIcon
+                  channel={
+                    selected.channel
+                  }
+                  size={13}
+                />
+
+                {translateChannel(
+                  selected.channel
+                )}
+              </strong>
+            </div>
+
+            <div className="analysisBlock">
+              <span>
+                Contact client
+              </span>
+
+              <strong
+                className={
+                  selected.customer_contact
+                    ? "connectedValue"
+                    : "mutedValue"
+                }
+              >
+                {selected.customer_contact ??
+                  "Nedisponibil"}
+              </strong>
+            </div>
+
+            <div className="analysisBlock">
+              <span>
                 Sursa date
               </span>
 
@@ -1597,6 +1782,12 @@ function Inbox() {
                   {conversationFieldErrors.message}
                 </span>
               )}
+            </div>
+
+            <div className="conversationSourceNote">
+              <Globe2 size={14} />
+
+              Conversatiile create manual sunt salvate pe canalul Web.
             </div>
 
             <div className="modalActions">

@@ -96,6 +96,7 @@ AUTH_SECRET = os.getenv(
 TOKEN_LIFETIME_SECONDS = 8 * 60 * 60
 
 
+
 def encode_base64(value: bytes) -> str:
     return (
         base64.urlsafe_b64encode(value)
@@ -222,6 +223,115 @@ async def log_activity(
     )
 
     db.add(activity)
+
+
+async def process_incoming_conversation(
+    db: AsyncSession,
+    *,
+    name: str,
+    subject: str,
+    message: str,
+    channel: str = "web",
+    external_id: str | None = None,
+    customer_contact: str | None = None,
+) -> Conversation:
+    analysis = analyze_message(message)
+
+    conversation = Conversation(
+        name=name,
+        subject=subject,
+        message=message,
+        intent=analysis.intent,
+        priority=analysis.priority,
+        sentiment=analysis.sentiment,
+        confidence=analysis.confidence,
+        channel=channel,
+        external_id=external_id,
+        customer_contact=customer_contact,
+    )
+
+    db.add(conversation)
+    await db.flush()
+
+    await log_activity(
+        db=db,
+        event_type="conversation_created",
+        title="Conversatie creata",
+        description=(
+            f"A fost creata o conversatie pentru {conversation.name} "
+            f"din canalul {conversation.channel}."
+        ),
+        entity_type="conversation",
+        entity_id=conversation.id,
+    )
+
+    settings_result = await db.execute(
+        select(AppSetting).where(
+            AppSetting.key == "response_mode"
+        )
+    )
+
+    response_mode_setting = (
+        settings_result.scalar_one_or_none()
+    )
+
+    response_mode = (
+        response_mode_setting.value
+        if response_mode_setting
+        else "draft"
+    )
+
+    auto_reply_min_confidence = 90
+
+    if (
+        response_mode == "auto"
+        and conversation.confidence >= auto_reply_min_confidence
+    ):
+        search_results = search_knowledge(
+            query=conversation.message,
+            limit=3,
+        )
+
+        knowledge_context = None
+        knowledge_source = None
+
+        if search_results:
+            best_result = search_results[0]
+            knowledge_context = best_result.get("text")
+            knowledge_source = best_result.get("filename")
+
+        generated_reply = generate_reply(
+            customer_name=conversation.name,
+            intent=conversation.intent,
+            message=conversation.message,
+            knowledge_context=knowledge_context,
+        )
+
+        automatic_reply = ConversationReply(
+            conversation_id=conversation.id,
+            content=generated_reply,
+            source=knowledge_source,
+            reply_type="automatic",
+        )
+
+        db.add(automatic_reply)
+
+        await log_activity(
+            db=db,
+            event_type="automatic_reply_sent",
+            title="Raspuns automat MIXORA",
+            description=(
+                f"MIXORA a generat automat un raspuns "
+                f"pentru {conversation.name}."
+            ),
+            entity_type="conversation",
+            entity_id=conversation.id,
+        )
+
+    await db.commit()
+    await db.refresh(conversation)
+
+    return conversation
 
 
 @asynccontextmanager
@@ -393,6 +503,7 @@ async def get_current_operator(
     )
 
 
+
 @app.get("/api/system/status")
 async def get_system_status(
     db: AsyncSession = Depends(get_db),
@@ -540,110 +651,15 @@ async def create_conversation(
     payload: ConversationCreate,
     db: AsyncSession = Depends(get_db),
 ):
-    analysis = analyze_message(
-        payload.message
-    )
-
-    conversation = Conversation(
+    return await process_incoming_conversation(
+        db=db,
         name=payload.name,
         subject=payload.subject,
         message=payload.message,
-        intent=analysis.intent,
-        priority=analysis.priority,
-        sentiment=analysis.sentiment,
-        confidence=analysis.confidence,
+        channel=payload.channel,
+        external_id=payload.external_id,
+        customer_contact=payload.customer_contact,
     )
-
-    db.add(conversation)
-
-    await db.flush()
-
-    await log_activity(
-        db=db,
-        event_type="conversation_created",
-        title="Conversatie creata",
-        description=(
-            f"A fost creata o conversatie pentru "
-            f"{conversation.name}."
-        ),
-        entity_type="conversation",
-        entity_id=conversation.id,
-    )
-
-    settings_result = await db.execute(
-        select(AppSetting).where(
-            AppSetting.key == "response_mode"
-        )
-    )
-
-    response_mode_setting = (
-        settings_result.scalar_one_or_none()
-    )
-
-    response_mode = (
-        response_mode_setting.value
-        if response_mode_setting
-        else "draft"
-    )
-
-    auto_reply_min_confidence = 90
-
-    if (
-        response_mode == "auto"
-        and conversation.confidence
-        >= auto_reply_min_confidence
-    ):
-        search_results = search_knowledge(
-            query=conversation.message,
-            limit=3,
-        )
-
-        knowledge_context = None
-        knowledge_source = None
-
-        if search_results:
-            best_result = search_results[0]
-
-            knowledge_context = best_result.get(
-                "text"
-            )
-
-            knowledge_source = best_result.get(
-                "filename"
-            )
-
-        generated_reply = generate_reply(
-            customer_name=conversation.name,
-            intent=conversation.intent,
-            message=conversation.message,
-            knowledge_context=knowledge_context,
-        )
-
-        automatic_reply = ConversationReply(
-            conversation_id=conversation.id,
-            content=generated_reply,
-            source=knowledge_source,
-            reply_type="automatic",
-        )
-
-        db.add(automatic_reply)
-
-        await log_activity(
-            db=db,
-            event_type="automatic_reply_sent",
-            title="Raspuns automat MIXORA",
-            description=(
-                f"MIXORA a generat automat un raspuns "
-                f"pentru {conversation.name}."
-            ),
-            entity_type="conversation",
-            entity_id=conversation.id,
-        )
-
-    await db.commit()
-    await db.refresh(conversation)
-
-    return conversation
 
 
 @app.post(
@@ -916,10 +932,10 @@ async def upload_knowledge_document(
 
     if len(raw_content) > max_file_size:
         raise HTTPException(
-        status_code=413,
-        detail=(
-            "Fisierul este prea mare. "
-            "Dimensiunea maxima permisa este 1 MB."
+            status_code=413,
+            detail=(
+                "Fisierul este prea mare. "
+                "Dimensiunea maxima permisa este 1 MB."
             ),
         )
 

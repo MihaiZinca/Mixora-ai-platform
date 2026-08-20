@@ -50,6 +50,25 @@ class Conversation(Base):
         nullable=False,
     )
 
+    channel: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default="web",
+        index=True,
+    )
+
+    external_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        index=True,
+    )
+
+    customer_contact: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+    )
+
 
 class KnowledgeDocument(Base):
     __tablename__ = "knowledge_documents"

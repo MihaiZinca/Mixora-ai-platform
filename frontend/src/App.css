@@ -2277,3 +2277,95 @@ button {
   color: #a1a1aa;
   font-size: 10px;
 }
+
+.conversationPreviewTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+}
+
+.channelBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+
+  padding: 4px 8px;
+
+  border: 1px solid;
+  border-radius: 999px;
+
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+
+
+.channelWeb {
+  color: #2563eb;
+  background: rgba(37, 99, 235, 0.08);
+  border-color: rgba(37, 99, 235, 0.2);
+}
+
+.channelEmail {
+  color: #9333ea;
+  background: rgba(147, 51, 234, 0.08);
+  border-color: rgba(147, 51, 234, 0.2);
+}
+
+.conversationContact {
+  display: block;
+
+  margin-top: 4px;
+
+  color: #64748b;
+
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.chatHeaderInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.chatHeaderTop {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.chatContact {
+  color: #64748b;
+
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.analysisChannel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.conversationSourceNote {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+
+  margin-top: 4px;
+  padding: 10px 12px;
+
+  color: #64748b;
+  background: rgba(148, 163, 184, 0.08);
+
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 10px;
+
+  font-size: 12px;
+}

@@ -48,6 +48,21 @@ class ConversationCreate(BaseModel):
         max_length=5000,
     )
 
+    channel: Literal[
+        "web",
+        "email",
+    ] = "web"
+
+    external_id: str | None = Field(
+        default=None,
+        max_length=255,
+    )
+
+    customer_contact: str | None = Field(
+        default=None,
+        max_length=100,
+    )
+
     @field_validator(
         "name",
         "subject",
@@ -67,6 +82,22 @@ class ConversationCreate(BaseModel):
 
         return value
 
+    @field_validator(
+        "external_id",
+        "customer_contact",
+    )
+    @classmethod
+    def clean_optional_text(
+        cls,
+        value: str | None,
+    ):
+        if value is None:
+            return None
+
+        value = value.strip()
+
+        return value or None
+
 
 class ConversationResponse(BaseModel):
     id: int
@@ -77,6 +108,9 @@ class ConversationResponse(BaseModel):
     priority: str
     sentiment: str
     confidence: float
+    channel: str
+    external_id: str | None
+    customer_contact: str | None
 
     model_config = ConfigDict(
         from_attributes=True
@@ -141,6 +175,7 @@ class RecentConversationResponse(BaseModel):
     intent: str
     priority: str
     confidence: float
+    channel: str
 
     model_config = ConfigDict(
         from_attributes=True
