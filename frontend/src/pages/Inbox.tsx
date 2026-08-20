@@ -55,6 +55,51 @@ type ResponseModeResponse = {
   mode: ResponseMode;
 };
 
+type ConversationFieldErrors = {
+  name?: string;
+  subject?: string;
+  message?: string;
+};
+
+async function getApiErrorMessage(
+  response: Response,
+  fallback: string
+) {
+  try {
+    const data = await response.json();
+
+    if (typeof data?.detail === "string") {
+      return data.detail;
+    }
+
+    if (Array.isArray(data?.detail)) {
+      const firstError = data.detail[0];
+
+      if (firstError?.loc && firstError?.msg) {
+        const field = firstError.loc[
+          firstError.loc.length - 1
+        ];
+
+        const fieldNames: Record<string, string> = {
+          name: "Numele",
+          subject: "Subiectul",
+          message: "Mesajul",
+          content: "Raspunsul",
+        };
+
+        const readableField =
+          fieldNames[field] ?? "Campul";
+
+        return `${readableField}: ${firstError.msg}`;
+      }
+    }
+  } catch {
+    // Raspunsul API nu contine JSON valid.
+  }
+
+  return fallback;
+}
+
 function translateIntent(intent: string) {
   const map: Record<string, string> = {
     "Return request": "Cerere de retur",
@@ -128,6 +173,12 @@ function Inbox() {
       subject: "",
       message: "",
     });
+
+  const [conversationFieldErrors, setConversationFieldErrors] =
+    useState<ConversationFieldErrors>({});
+
+  const [replyValidationError, setReplyValidationError] =
+    useState("");
 
   const [creating, setCreating] =
     useState(false);
@@ -270,12 +321,43 @@ function Inbox() {
     }
   }, [selected?.id]);
 
+  const validateNewConversation = () => {
+    const errors: ConversationFieldErrors = {};
+
+    const name = newConversation.name.trim();
+    const subject = newConversation.subject.trim();
+    const message = newConversation.message.trim();
+
+    if (name.length < 2) {
+      errors.name =
+        "Numele trebuie sa aiba minimum 2 caractere.";
+    }
+
+    if (subject.length < 3) {
+      errors.subject =
+        "Subiectul trebuie sa aiba minimum 3 caractere.";
+    }
+
+    if (message.length < 5) {
+      errors.message =
+        "Mesajul trebuie sa aiba minimum 5 caractere.";
+    }
+
+    setConversationFieldErrors(errors);
+
+    return Object.keys(errors).length === 0;
+  };
+
+  const isNewConversationValid =
+    newConversation.name.trim().length >= 2 &&
+    newConversation.subject.trim().length >= 3 &&
+    newConversation.message.trim().length >= 5;
+
   const createConversation = async () => {
-    if (
-      !newConversation.name.trim() ||
-      !newConversation.subject.trim() ||
-      !newConversation.message.trim()
-    ) {
+    if (!validateNewConversation()) {
+      setError(
+        "Verifica datele introduse inainte de a crea conversatia."
+      );
       return;
     }
 
@@ -292,16 +374,21 @@ function Inbox() {
             "Content-Type":
               "application/json",
           },
-          body: JSON.stringify(
-            newConversation
-          ),
+          body: JSON.stringify({
+            name: newConversation.name.trim(),
+            subject: newConversation.subject.trim(),
+            message: newConversation.message.trim(),
+          }),
         }
       );
 
       if (!response.ok) {
-        throw new Error(
+        const message = await getApiErrorMessage(
+          response,
           "Conversatia nu a putut fi creata."
         );
+
+        throw new Error(message);
       }
 
       const created: Conversation =
@@ -323,6 +410,7 @@ function Inbox() {
         message: "",
       });
 
+      setConversationFieldErrors({});
       setShowNewConversation(false);
 
       if (
@@ -351,7 +439,9 @@ function Inbox() {
       console.error(err);
 
       setError(
-        "Conversatia nu a putut fi creata."
+        err instanceof Error
+          ? err.message
+          : "Conversatia nu a putut fi creata."
       );
     } finally {
       setCreating(false);
@@ -377,9 +467,12 @@ function Inbox() {
       );
 
       if (!response.ok) {
-        throw new Error(
+        const message = await getApiErrorMessage(
+          response,
           "Raspunsul nu a putut fi generat."
         );
+
+        throw new Error(message);
       }
 
       const data: GeneratedReplyResponse =
@@ -399,12 +492,27 @@ function Inbox() {
   };
 
   const sendReply = async () => {
-    if (
-      !selected ||
-      !reply.trim()
-    ) {
+    if (!selected) {
       return;
     }
+
+    const cleanReply = reply.trim();
+
+    if (!cleanReply) {
+      setReplyValidationError(
+        "Raspunsul nu poate fi gol."
+      );
+      return;
+    }
+
+    if (cleanReply.length > 10000) {
+      setReplyValidationError(
+        "Raspunsul poate avea maximum 10000 de caractere."
+      );
+      return;
+    }
+
+    setReplyValidationError("");
 
     try {
       setSending(true);
@@ -420,16 +528,19 @@ function Inbox() {
               "application/json",
           },
           body: JSON.stringify({
-            content: reply,
+            content: cleanReply,
             source: replySource,
           }),
         }
       );
 
       if (!response.ok) {
-        throw new Error(
+        const message = await getApiErrorMessage(
+          response,
           "Raspunsul nu a putut fi trimis."
         );
+
+        throw new Error(message);
       }
 
       const createdReply:
@@ -451,7 +562,9 @@ function Inbox() {
       console.error(err);
 
       setError(
-        "Raspunsul nu a putut fi trimis."
+        err instanceof Error
+          ? err.message
+          : "Raspunsul nu a putut fi trimis."
       );
     } finally {
       setSending(false);
@@ -573,6 +686,7 @@ function Inbox() {
 
     setReply("");
     setReplySource(null);
+    setReplyValidationError("");
     setError("");
     setSuccessMessage("");
 
@@ -703,11 +817,12 @@ function Inbox() {
 
           <button
             className="primaryButton"
-            onClick={() =>
+            onClick={() => {
+              setConversationFieldErrors({});
               setShowNewConversation(
                 true
-              )
-            }
+              );
+            }}
           >
             <Plus size={16} />
             Conversatie noua
@@ -736,11 +851,12 @@ function Inbox() {
 
           <button
             className="primaryButton"
-            onClick={() =>
+            onClick={() => {
+              setConversationFieldErrors({});
               setShowNewConversation(
                 true
-              )
-            }
+              );
+            }}
           >
             <Plus size={16} />
             Creeaza prima conversatie
@@ -1050,13 +1166,31 @@ function Inbox() {
             <div className="composer">
               <textarea
                 value={reply}
-                onChange={(event) =>
+                maxLength={10000}
+                onChange={(event) => {
                   setReply(
                     event.target.value
-                  )
-                }
+                  );
+
+                  if (replyValidationError) {
+                    setReplyValidationError("");
+                  }
+                }}
                 placeholder="Scrie un raspuns sau genereaza unul cu MIXORA..."
               />
+
+              {replyValidationError && (
+                <span
+                  style={{
+                    display: "block",
+                    marginTop: "6px",
+                    color: "#f87171",
+                    fontSize: "11px",
+                  }}
+                >
+                  {replyValidationError}
+                </span>
+              )}
 
               <div className="composerActions">
                 <button
@@ -1325,11 +1459,12 @@ function Inbox() {
 
               <button
                 className="iconButton"
-                onClick={() =>
+                onClick={() => {
                   setShowNewConversation(
                     false
-                  )
-                }
+                  );
+                  setConversationFieldErrors({});
+                }}
               >
                 <X size={18} />
               </button>
@@ -1344,15 +1479,38 @@ function Inbox() {
                 value={
                   newConversation.name
                 }
-                onChange={(event) =>
+                maxLength={100}
+                onChange={(event) => {
                   setNewConversation({
                     ...newConversation,
                     name:
                       event.target.value,
-                  })
-                }
+                  });
+
+                  if (conversationFieldErrors.name) {
+                    setConversationFieldErrors(
+                      (current) => ({
+                        ...current,
+                        name: undefined,
+                      })
+                    );
+                  }
+                }}
                 placeholder="Exemplu: Alex Popescu"
               />
+
+              {conversationFieldErrors.name && (
+                <span
+                  style={{
+                    display: "block",
+                    marginTop: "6px",
+                    color: "#f87171",
+                    fontSize: "11px",
+                  }}
+                >
+                  {conversationFieldErrors.name}
+                </span>
+              )}
             </div>
 
             <div className="formGroup">
@@ -1364,15 +1522,38 @@ function Inbox() {
                 value={
                   newConversation.subject
                 }
-                onChange={(event) =>
+                maxLength={200}
+                onChange={(event) => {
                   setNewConversation({
                     ...newConversation,
                     subject:
                       event.target.value,
-                  })
-                }
+                  });
+
+                  if (conversationFieldErrors.subject) {
+                    setConversationFieldErrors(
+                      (current) => ({
+                        ...current,
+                        subject: undefined,
+                      })
+                    );
+                  }
+                }}
                 placeholder="Exemplu: Problema livrare"
               />
+
+              {conversationFieldErrors.subject && (
+                <span
+                  style={{
+                    display: "block",
+                    marginTop: "6px",
+                    color: "#f87171",
+                    fontSize: "11px",
+                  }}
+                >
+                  {conversationFieldErrors.subject}
+                </span>
+              )}
             </div>
 
             <div className="formGroup">
@@ -1384,25 +1565,49 @@ function Inbox() {
                 value={
                   newConversation.message
                 }
-                onChange={(event) =>
+                maxLength={5000}
+                onChange={(event) => {
                   setNewConversation({
                     ...newConversation,
                     message:
                       event.target.value,
-                  })
-                }
+                  });
+
+                  if (conversationFieldErrors.message) {
+                    setConversationFieldErrors(
+                      (current) => ({
+                        ...current,
+                        message: undefined,
+                      })
+                    );
+                  }
+                }}
                 placeholder="Scrie mesajul clientului..."
               />
+
+              {conversationFieldErrors.message && (
+                <span
+                  style={{
+                    display: "block",
+                    marginTop: "6px",
+                    color: "#f87171",
+                    fontSize: "11px",
+                  }}
+                >
+                  {conversationFieldErrors.message}
+                </span>
+              )}
             </div>
 
             <div className="modalActions">
               <button
                 className="secondaryButton"
-                onClick={() =>
+                onClick={() => {
                   setShowNewConversation(
                     false
-                  )
-                }
+                  );
+                  setConversationFieldErrors({});
+                }}
               >
                 Anuleaza
               </button>
@@ -1414,9 +1619,7 @@ function Inbox() {
                 }
                 disabled={
                   creating ||
-                  !newConversation.name.trim() ||
-                  !newConversation.subject.trim() ||
-                  !newConversation.message.trim()
+                  !isNewConversationValid
                 }
               >
                 {creating

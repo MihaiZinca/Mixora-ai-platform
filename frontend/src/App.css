@@ -2003,3 +2003,15 @@ button {
   color: #a1a1aa;
   font-size: 9px;
 }
+.serviceOnlineText {
+  color: #4ade80;
+}
+
+.serviceOfflineText {
+  color: #f87171;
+}
+
+.statusDotOffline {
+  background: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.08);
+}

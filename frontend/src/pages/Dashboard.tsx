@@ -47,6 +47,12 @@ type ActivityLog = {
   created_at: string;
 };
 
+type SystemStatus = {
+  api: string;
+  database: string;
+  qdrant: string;
+};
+
 function translateIntent(intent: string) {
   const map: Record<string, string> = {
     "Return request": "Cerere de retur",
@@ -136,6 +142,9 @@ function Dashboard() {
   const [activity, setActivity] =
     useState<ActivityLog[]>([]);
 
+  const [systemStatus, setSystemStatus] =
+    useState<SystemStatus | null>(null);
+
   const [loading, setLoading] =
     useState(true);
 
@@ -152,6 +161,7 @@ function Dashboard() {
         recentResponse,
         intentsResponse,
         activityResponse,
+        systemResponse,
       ] = await Promise.all([
         fetch(
           "http://localhost:8000/api/dashboard/stats"
@@ -165,13 +175,17 @@ function Dashboard() {
         fetch(
           "http://localhost:8000/api/dashboard/recent-activity"
         ),
+        fetch(
+          "http://localhost:8000/api/system/status"
+        ),
       ]);
 
       if (
         !statsResponse.ok ||
         !recentResponse.ok ||
         !intentsResponse.ok ||
-        !activityResponse.ok
+        !activityResponse.ok ||
+        !systemResponse.ok
       ) {
         throw new Error(
           "Dashboard-ul nu a putut fi incarcat."
@@ -190,10 +204,14 @@ function Dashboard() {
       const activityData: ActivityLog[] =
         await activityResponse.json();
 
+      const systemData: SystemStatus =
+        await systemResponse.json();
+
       setStats(statsData);
       setRecent(recentData);
       setIntents(intentData);
       setActivity(activityData);
+      setSystemStatus(systemData);
     } catch (err) {
       console.error(err);
 
@@ -224,7 +242,11 @@ function Dashboard() {
     );
   }
 
-  if (error || !stats) {
+  if (
+    error ||
+    !stats ||
+    !systemStatus
+  ) {
     return (
       <div className="pageState">
         <strong>
@@ -248,6 +270,15 @@ function Dashboard() {
     ),
     1
   );
+
+  const apiOnline =
+    systemStatus.api === "online";
+
+  const databaseOnline =
+    systemStatus.database === "online";
+
+  const qdrantOnline =
+    systemStatus.qdrant === "online";
 
   return (
     <>
@@ -376,15 +407,11 @@ function Dashboard() {
 
                   <div className="dashboardConversationInfo">
                     <strong>
-                      {
-                        conversation.name
-                      }
+                      {conversation.name}
                     </strong>
 
                     <span>
-                      {
-                        conversation.subject
-                      }
+                      {conversation.subject}
                     </span>
                   </div>
 
@@ -396,10 +423,7 @@ function Dashboard() {
                     </span>
 
                     <small>
-                      {
-                        conversation.confidence
-                      }
-                      %
+                      {conversation.confidence}%
                     </small>
                   </div>
 
@@ -519,9 +543,7 @@ function Dashboard() {
                       </strong>
 
                       <span>
-                        {
-                          item.description
-                        }
+                        {item.description}
                       </span>
 
                       <small>
@@ -553,6 +575,7 @@ function Dashboard() {
           <div className="dashboardStatusRow">
             <div>
               <Clock3 size={17} />
+
               <span>
                 Deschise
               </span>
@@ -573,9 +596,7 @@ function Dashboard() {
             </div>
 
             <strong>
-              {
-                stats.tickets_in_progress
-              }
+              {stats.tickets_in_progress}
             </strong>
           </div>
 
@@ -611,45 +632,105 @@ function Dashboard() {
 
           <div className="systemService">
             <div>
-              <span className="statusDot" />
+              <span
+                className={`statusDot ${
+                  !apiOnline
+                    ? "statusDotOffline"
+                    : ""
+                }`}
+              />
+
               FastAPI
             </div>
 
-            <strong>
-              ONLINE
+            <strong
+              className={
+                apiOnline
+                  ? "serviceOnlineText"
+                  : "serviceOfflineText"
+              }
+            >
+              {apiOnline
+                ? "ONLINE"
+                : "OFFLINE"}
             </strong>
           </div>
 
           <div className="systemService">
             <div>
-              <span className="statusDot" />
+              <span
+                className={`statusDot ${
+                  !databaseOnline
+                    ? "statusDotOffline"
+                    : ""
+                }`}
+              />
+
               PostgreSQL
             </div>
 
-            <strong>
-              ONLINE
+            <strong
+              className={
+                databaseOnline
+                  ? "serviceOnlineText"
+                  : "serviceOfflineText"
+              }
+            >
+              {databaseOnline
+                ? "ONLINE"
+                : "OFFLINE"}
             </strong>
           </div>
 
           <div className="systemService">
             <div>
-              <span className="statusDot" />
+              <span
+                className={`statusDot ${
+                  !qdrantOnline
+                    ? "statusDotOffline"
+                    : ""
+                }`}
+              />
+
               Qdrant
             </div>
 
-            <strong>
-              ONLINE
+            <strong
+              className={
+                qdrantOnline
+                  ? "serviceOnlineText"
+                  : "serviceOfflineText"
+              }
+            >
+              {qdrantOnline
+                ? "ONLINE"
+                : "OFFLINE"}
             </strong>
           </div>
 
           <div className="systemService">
             <div>
-              <span className="statusDot" />
+              <span
+                className={`statusDot ${
+                  !qdrantOnline
+                    ? "statusDotOffline"
+                    : ""
+                }`}
+              />
+
               RAG Engine
             </div>
 
-            <strong>
-              READY
+            <strong
+              className={
+                qdrantOnline
+                  ? "serviceOnlineText"
+                  : "serviceOfflineText"
+              }
+            >
+              {qdrantOnline
+                ? "READY"
+                : "OFFLINE"}
             </strong>
           </div>
         </div>
@@ -669,9 +750,7 @@ function Dashboard() {
 
           <div className="dashboardStatusRow">
             <div>
-              <MessageSquare
-                size={17}
-              />
+              <MessageSquare size={17} />
 
               <span>
                 Conversatii procesate
@@ -685,9 +764,7 @@ function Dashboard() {
 
           <div className="dashboardStatusRow">
             <div>
-              <TicketCheck
-                size={17}
-              />
+              <TicketCheck size={17} />
 
               <span>
                 Tichete totale
@@ -709,9 +786,7 @@ function Dashboard() {
             </div>
 
             <strong>
-              {
-                stats.knowledge_documents
-              }
+              {stats.knowledge_documents}
             </strong>
           </div>
         </div>

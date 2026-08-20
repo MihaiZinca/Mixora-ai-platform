@@ -641,6 +641,16 @@ async def upload_knowledge_document(
         )
 
     raw_content = await file.read()
+    max_file_size = 1 * 1024 * 1024
+
+    if len(raw_content) > max_file_size:
+        raise HTTPException(
+        status_code=413,
+        detail=(
+            "Fisierul este prea mare. "
+            "Dimensiunea maxima permisa este 1 MB."
+            ),
+        )
 
     try:
         content = raw_content.decode(
@@ -842,56 +852,6 @@ async def delete_knowledge_document(
         ),
     }
 
-
-@app.post(
-    "/api/knowledge/cleanup-duplicates"
-)
-async def cleanup_knowledge_duplicates(
-    db: AsyncSession = Depends(get_db),
-):
-    result = await db.execute(
-        select(KnowledgeDocument).order_by(
-            KnowledgeDocument.id.asc()
-        )
-    )
-
-    documents = result.scalars().all()
-
-    seen_filenames: set[str] = set()
-    removed_documents = []
-
-    for document in documents:
-        if document.filename not in seen_filenames:
-            seen_filenames.add(
-                document.filename
-            )
-            continue
-
-        try:
-            delete_document_vectors(
-                document_id=document.id
-            )
-        except Exception:
-            pass
-
-        removed_documents.append(
-            {
-                "id": document.id,
-                "filename": document.filename,
-            }
-        )
-
-        await db.delete(document)
-
-    await db.commit()
-
-    return {
-        "status": "ok",
-        "duplicate_sterse": len(
-            removed_documents
-        ),
-        "documente_sterse": removed_documents,
-    }
 
 
 @app.get(

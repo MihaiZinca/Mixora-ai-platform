@@ -1,12 +1,45 @@
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+)
 
 
 class ConversationCreate(BaseModel):
-    name: str
-    subject: str
-    message: str
+    name: str = Field(
+        min_length=2,
+        max_length=100,
+    )
+
+    subject: str = Field(
+        min_length=3,
+        max_length=200,
+    )
+
+    message: str = Field(
+        min_length=5,
+        max_length=5000,
+    )
+
+    @field_validator(
+        "name",
+        "subject",
+        "message",
+    )
+    @classmethod
+    def strip_text(cls, value: str):
+        value = value.strip()
+
+        if not value:
+            raise ValueError(
+                "Campul nu poate fi gol."
+            )
+
+        return value
 
 
 class ConversationResponse(BaseModel):
@@ -58,7 +91,11 @@ class TicketResponse(BaseModel):
 
 
 class TicketStatusUpdate(BaseModel):
-    status: str
+    status: Literal[
+        "Open",
+        "In Progress",
+        "Resolved",
+    ]
 
 
 class DashboardStatsResponse(BaseModel):
@@ -90,8 +127,27 @@ class IntentStatsResponse(BaseModel):
 
 
 class ReplyCreate(BaseModel):
-    content: str
-    source: str | None = None
+    content: str = Field(
+        min_length=1,
+        max_length=10000,
+    )
+
+    source: str | None = Field(
+        default=None,
+        max_length=255,
+    )
+
+    @field_validator("content")
+    @classmethod
+    def clean_content(cls, value: str):
+        value = value.strip()
+
+        if not value:
+            raise ValueError(
+                "Raspunsul nu poate fi gol."
+            )
+
+        return value
 
 
 class ReplyResponse(BaseModel):
@@ -108,7 +164,10 @@ class ReplyResponse(BaseModel):
 
 
 class ResponseModeUpdate(BaseModel):
-    mode: str
+    mode: Literal[
+        "draft",
+        "auto",
+    ]
 
 
 class ResponseModeResponse(BaseModel):
