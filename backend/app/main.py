@@ -65,6 +65,11 @@ from app.schemas import (
     AuthMeResponse,
 )
 
+from app.gmail_service import (
+    list_recent_emails,
+    send_email,
+)
+
 load_dotenv()
 
 
@@ -223,6 +228,18 @@ async def log_activity(
     )
 
     db.add(activity)
+
+def extract_email_address(
+    value: str,
+) -> str:
+    if "<" in value and ">" in value:
+        return (
+            value.split("<", 1)[1]
+            .split(">", 1)[0]
+            .strip()
+        )
+
+    return value.strip()
 
 
 async def process_incoming_conversation(
@@ -660,7 +677,118 @@ async def create_conversation(
         external_id=payload.external_id,
         customer_contact=payload.customer_contact,
     )
+@app.post("/api/email/import")
+async def import_gmail_messages(
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        emails = list_recent_emails(
+            max_results=20
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Nu s-a putut realiza "
+                "conexiunea cu Gmail."
+            ),
+        ) from exc
 
+    imported = 0
+    skipped = 0
+    conversations = []
+
+    for email in emails:
+        gmail_id = email.get("id")
+
+        if not gmail_id:
+            skipped += 1
+            continue
+
+        existing_result = await db.execute(
+            select(Conversation).where(
+                Conversation.channel == "email",
+                Conversation.external_id == gmail_id,
+            )
+        )
+
+        existing = (
+            existing_result.scalar_one_or_none()
+        )
+
+        if existing is not None:
+            skipped += 1
+            continue
+
+        sender = (
+            email.get("from") or "Client Gmail"
+        ).strip()
+
+        customer_email = extract_email_address(
+            sender
+        )
+
+        subject = (
+            email.get("subject")
+            or "Mesaj Gmail"
+        ).strip()
+
+        body = (
+            email.get("body")
+            or email.get("snippet")
+            or ""
+        ).strip()
+
+        if not body:
+            skipped += 1
+            continue
+
+        customer_name = sender
+
+        if "<" in sender:
+            possible_name = (
+                sender.split("<", 1)[0]
+                .strip()
+                .strip('"')
+            )
+
+            if possible_name:
+                customer_name = possible_name
+            else:
+                customer_name = customer_email
+
+        if len(customer_name) > 100:
+            customer_name = customer_name[:100]
+
+        if len(subject) > 200:
+            subject = subject[:200]
+
+        conversation = (
+            await process_incoming_conversation(
+                db=db,
+                name=customer_name,
+                subject=subject,
+                message=body[:5000],
+                channel="email",
+                external_id=gmail_id,
+                customer_contact=customer_email[:100],
+            )
+        )
+
+        conversations.append(
+            ConversationResponse.model_validate(
+                conversation
+            )
+        )
+
+        imported += 1
+
+    return {
+        "status": "ok",
+        "imported": imported,
+        "skipped": skipped,
+        "conversations": conversations,
+    }
 
 @app.post(
     "/api/conversations/{conversation_id}/generate-reply",
@@ -850,6 +978,44 @@ async def send_conversation_reply(
             detail="Raspunsul nu poate fi gol.",
         )
 
+    # Daca mesajul provine din Gmail,
+    # trimitem raspunsul real prin Gmail.
+    if conversation.channel == "email":
+        customer_email = (
+            conversation.customer_contact or ""
+        ).strip()
+
+        if not customer_email:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Conversatia nu are o adresa "
+                    "de email asociata."
+                ),
+            )
+
+        email_subject = (
+            conversation.subject or "Raspuns MIXORA"
+        ).strip()
+
+        if not email_subject.lower().startswith("re:"):
+            email_subject = f"Re: {email_subject}"
+
+        try:
+            send_email(
+                to_email=customer_email,
+                subject=email_subject,
+                body=content,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    "Raspunsul nu a putut fi "
+                    "trimis prin Gmail."
+                ),
+            ) from exc
+
     reply = ConversationReply(
         conversation_id=conversation_id,
         content=content,
@@ -859,14 +1025,35 @@ async def send_conversation_reply(
 
     db.add(reply)
 
-    await log_activity(
-        db=db,
-        event_type="manual_reply_sent",
-        title="Raspuns manual trimis",
-        description=(
+    event_type = (
+        "email_reply_sent"
+        if conversation.channel == "email"
+        else "manual_reply_sent"
+    )
+
+    activity_title = (
+        "Email trimis"
+        if conversation.channel == "email"
+        else "Raspuns manual trimis"
+    )
+
+    activity_description = (
+        (
+            f"Un email a fost trimis catre "
+            f"{conversation.customer_contact}."
+        )
+        if conversation.channel == "email"
+        else (
             f"A fost trimis un raspuns manual "
             f"pentru {conversation.name}."
-        ),
+        )
+    )
+
+    await log_activity(
+        db=db,
+        event_type=event_type,
+        title=activity_title,
+        description=activity_description,
         entity_type="conversation",
         entity_id=conversation.id,
     )

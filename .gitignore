@@ -56,3 +56,6 @@ backend/knowledge_files/
 # Operating system
 Thumbs.db
 desktop.ini
+
+backend/credentials.json
+backend/token.json

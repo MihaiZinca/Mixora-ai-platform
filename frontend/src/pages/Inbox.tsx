@@ -236,6 +236,9 @@ function Inbox() {
 
   const [sending, setSending] =
     useState(false);
+  
+  const [syncingEmail, setSyncingEmail] =
+    useState(false);
 
   const [reanalyzing, setReanalyzing] =
     useState(false);
@@ -324,6 +327,63 @@ function Inbox() {
       setLoading(false);
     }
   };
+
+  const syncEmail = async () => {
+  try {
+    setSyncingEmail(true);
+    setError("");
+    setSuccessMessage("");
+
+    const response = await fetch(
+      "http://localhost:8000/api/email/import",
+      {
+        method: "POST",
+      }
+    );
+
+    if (!response.ok) {
+      const message = await getApiErrorMessage(
+        response,
+        "Emailurile nu au putut fi sincronizate."
+      );
+
+      throw new Error(message);
+    }
+
+    const data: {
+      status: string;
+      imported: number;
+      skipped: number;
+    } = await response.json();
+
+    await loadConversations();
+
+    if (data.imported === 0) {
+      setSuccessMessage(
+        "Email sincronizat. Nu exista mesaje noi."
+      );
+    } else {
+      setSuccessMessage(
+        `${data.imported} ${
+          data.imported === 1
+            ? "email nou a fost importat"
+            : "emailuri noi au fost importate"
+        }.`
+      );
+    }
+  } catch (err) {
+    console.error(err);
+
+    setError(
+      err instanceof Error
+        ? err.message
+        : "Emailurile nu au putut fi sincronizate."
+    );
+  } finally {
+    setSyncingEmail(false);
+    }
+  };
+
 
   const loadReplies = async (
     conversationId: number
@@ -880,6 +940,21 @@ function Inbox() {
             <span className="statusDot" />
             API conectat
           </div>
+
+          <button
+            className="secondaryButton"
+            onClick={syncEmail}
+            disabled={syncingEmail}
+          >
+          <RefreshCw
+            className={syncingEmail ? "spin" : ""}
+            size={16}
+          />
+
+           {syncingEmail
+               ? "Se sincronizeaza..."
+               : "Sincronizeaza Email"}
+          </button>
 
           <button
             className="primaryButton"
