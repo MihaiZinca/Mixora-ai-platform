@@ -6,10 +6,12 @@ import {
   Upload,
 } from "lucide-react";
 import {
-  ChangeEvent,
   useEffect,
   useRef,
   useState,
+} from "react";
+import type {
+  ChangeEvent,
 } from "react";
 
 type KnowledgeDocument = {
@@ -21,20 +23,62 @@ type KnowledgeDocument = {
   created_at: string;
 };
 
+async function getApiErrorMessage(
+  response: Response,
+  fallback: string
+) {
+  try {
+    const data = await response.json();
+
+    if (
+      typeof data?.detail === "string"
+    ) {
+      return data.detail;
+    }
+  } catch {
+    // Raspuns non-JSON.
+  }
+
+  return fallback;
+}
+
 function Knowledge() {
-  const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [uploading, setUploading] = useState(false);
-  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [documents, setDocuments] =
+    useState<KnowledgeDocument[]>([]);
 
-  const [error, setError] = useState("");
-  const [successMessage, setSuccessMessage] = useState("");
+  const [loading, setLoading] =
+    useState(true);
 
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [refreshing, setRefreshing] =
+    useState(false);
 
-  const loadDocuments = async () => {
+  const [uploading, setUploading] =
+    useState(false);
+
+  const [deletingId, setDeletingId] =
+    useState<number | null>(null);
+
+  const [error, setError] =
+    useState("");
+
+  const [successMessage, setSuccessMessage] =
+    useState("");
+
+  const fileInputRef =
+    useRef<HTMLInputElement | null>(
+      null
+    );
+
+  const loadDocuments = async (
+    silent = false
+  ) => {
     try {
-      setLoading(true);
+      if (silent) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
+
       setError("");
 
       const response = await fetch(
@@ -42,12 +86,17 @@ function Knowledge() {
       );
 
       if (!response.ok) {
-        throw new Error(
-          "Documentele nu au putut fi incarcate."
-        );
+        const message =
+          await getApiErrorMessage(
+            response,
+            "Documentele nu au putut fi incarcate."
+          );
+
+        throw new Error(message);
       }
 
-      const data: KnowledgeDocument[] =
+      const data:
+        KnowledgeDocument[] =
         await response.json();
 
       setDocuments(data);
@@ -55,10 +104,13 @@ function Knowledge() {
       console.error(err);
 
       setError(
-        "Nu s-a putut realiza conexiunea cu serverul MIXORA."
+        err instanceof Error
+          ? err.message
+          : "Nu s-a putut realiza conexiunea cu serverul MIXORA."
       );
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
@@ -67,11 +119,71 @@ function Knowledge() {
   }, []);
 
   const uploadFile = async (
-    event: ChangeEvent<HTMLInputElement>
+    event:
+      ChangeEvent<HTMLInputElement>
   ) => {
-    const file = event.target.files?.[0];
+    const file =
+      event.target.files?.[0];
 
     if (!file) {
+      return;
+    }
+
+    const allowedExtensions = [
+      ".txt",
+      ".md",
+    ];
+
+    const filename =
+      file.name.toLowerCase();
+
+    const validExtension =
+      allowedExtensions.some(
+        (extension) =>
+          filename.endsWith(
+            extension
+          )
+      );
+
+    if (!validExtension) {
+      setError(
+        "Sunt acceptate doar fisiere TXT si MD."
+      );
+
+      if (fileInputRef.current) {
+        fileInputRef.current.value =
+          "";
+      }
+
+      return;
+    }
+
+    const maxFileSize =
+      1 * 1024 * 1024;
+
+    if (file.size > maxFileSize) {
+      setError(
+        "Fisierul este prea mare. Dimensiunea maxima permisa este 1 MB."
+      );
+
+      if (fileInputRef.current) {
+        fileInputRef.current.value =
+          "";
+      }
+
+      return;
+    }
+
+    if (file.size === 0) {
+      setError(
+        "Fisierul selectat este gol."
+      );
+
+      if (fileInputRef.current) {
+        fileInputRef.current.value =
+          "";
+      }
+
       return;
     }
 
@@ -80,9 +192,13 @@ function Knowledge() {
       setError("");
       setSuccessMessage("");
 
-      const formData = new FormData();
+      const formData =
+        new FormData();
 
-      formData.append("file", file);
+      formData.append(
+        "file",
+        file
+      );
 
       const response = await fetch(
         "http://localhost:8000/api/knowledge/upload",
@@ -92,33 +208,19 @@ function Knowledge() {
         }
       );
 
-      let responseData: {
-        detail?: string;
-      } = {};
-
-      try {
-        responseData = await response.json();
-      } catch {
-        responseData = {};
-      }
-
-      if (response.status === 409) {
-        setError(
-          "Documentul exista deja in baza de cunostinte."
-        );
-
-        return;
-      }
-
       if (!response.ok) {
-        throw new Error(
-          responseData.detail ||
+        const message =
+          await getApiErrorMessage(
+            response,
             "Documentul nu a putut fi incarcat."
-        );
+          );
+
+        throw new Error(message);
       }
 
-      const created =
-        responseData as KnowledgeDocument;
+      const created:
+        KnowledgeDocument =
+        await response.json();
 
       setDocuments((current) => [
         created,
@@ -133,7 +235,8 @@ function Knowledge() {
 
       if (
         err instanceof TypeError &&
-        err.message === "Failed to fetch"
+        err.message ===
+          "Failed to fetch"
       ) {
         setError(
           "Nu s-a putut realiza conexiunea cu serverul MIXORA. Verifica daca backend-ul este pornit."
@@ -142,37 +245,41 @@ function Knowledge() {
         return;
       }
 
-      if (err instanceof Error) {
-        setError(err.message);
-
-        return;
-      }
-
       setError(
-        "A aparut o eroare la incarcarea documentului."
+        err instanceof Error
+          ? err.message
+          : "A aparut o eroare la incarcarea documentului."
       );
     } finally {
       setUploading(false);
 
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
+      if (
+        fileInputRef.current
+      ) {
+        fileInputRef.current.value =
+          "";
       }
     }
   };
 
   const deleteDocument = async (
-    document: KnowledgeDocument
+    document:
+      KnowledgeDocument
   ) => {
-    const confirmed = window.confirm(
-      `Sigur vrei sa stergi documentul "${document.filename}"?`
-    );
+    const confirmed =
+      window.confirm(
+        `Sigur vrei sa stergi documentul "${document.filename}"?`
+      );
 
     if (!confirmed) {
       return;
     }
 
     try {
-      setDeletingId(document.id);
+      setDeletingId(
+        document.id
+      );
+
       setError("");
       setSuccessMessage("");
 
@@ -184,27 +291,22 @@ function Knowledge() {
       );
 
       if (!response.ok) {
-        let message =
-          "Documentul nu a putut fi sters.";
-
-        try {
-          const data = await response.json();
-
-          if (data.detail) {
-            message = data.detail;
-          }
-        } catch {
-          // Ignoram daca raspunsul nu este JSON.
-        }
+        const message =
+          await getApiErrorMessage(
+            response,
+            "Documentul nu a putut fi sters."
+          );
 
         throw new Error(message);
       }
 
-      setDocuments((current) =>
-        current.filter(
-          (item) =>
-            item.id !== document.id
-        )
+      setDocuments(
+        (current) =>
+          current.filter(
+            (item) =>
+              item.id !==
+              document.id
+          )
       );
 
       setSuccessMessage(
@@ -215,7 +317,8 @@ function Knowledge() {
 
       if (
         err instanceof TypeError &&
-        err.message === "Failed to fetch"
+        err.message ===
+          "Failed to fetch"
       ) {
         setError(
           "Nu s-a putut realiza conexiunea cu serverul MIXORA. Verifica daca backend-ul este pornit."
@@ -224,14 +327,10 @@ function Knowledge() {
         return;
       }
 
-      if (err instanceof Error) {
-        setError(err.message);
-
-        return;
-      }
-
       setError(
-        "A aparut o eroare la stergerea documentului."
+        err instanceof Error
+          ? err.message
+          : "A aparut o eroare la stergerea documentului."
       );
     } finally {
       setDeletingId(null);
@@ -271,26 +370,52 @@ function Knowledge() {
           </p>
         </div>
 
-        <button
-          className="primaryButton"
-          onClick={() =>
-            fileInputRef.current?.click()
-          }
-          disabled={uploading}
-        >
-          {uploading ? (
+        <div className="headerActions">
+          <button
+            className="secondaryButton"
+            onClick={() =>
+              loadDocuments(true)
+            }
+            disabled={
+              refreshing ||
+              uploading
+            }
+          >
             <RefreshCw
-              className="spin"
+              className={
+                refreshing
+                  ? "spin"
+                  : ""
+              }
               size={16}
             />
-          ) : (
-            <Upload size={16} />
-          )}
 
-          {uploading
-            ? "Se incarca..."
-            : "Incarca document"}
-        </button>
+            {refreshing
+              ? "Se reincarca..."
+              : "Reincarca"}
+          </button>
+
+          <button
+            className="primaryButton"
+            onClick={() =>
+              fileInputRef.current?.click()
+            }
+            disabled={uploading}
+          >
+            {uploading ? (
+              <RefreshCw
+                className="spin"
+                size={16}
+              />
+            ) : (
+              <Upload size={16} />
+            )}
+
+            {uploading
+              ? "Se incarca..."
+              : "Incarca document"}
+          </button>
+        </div>
 
         <input
           ref={fileInputRef}
@@ -329,7 +454,7 @@ function Knowledge() {
         </p>
 
         <span>
-          Formate acceptate: TXT si MD
+          Formate acceptate: TXT si MD · Maximum 1 MB
         </span>
       </div>
 
@@ -353,7 +478,8 @@ function Knowledge() {
       </div>
 
       <div className="knowledgeDocuments">
-        {documents.length === 0 ? (
+        {documents.length ===
+        0 ? (
           <div className="emptyKnowledge">
             <FileText size={30} />
 
@@ -366,54 +492,77 @@ function Knowledge() {
             </span>
           </div>
         ) : (
-          documents.map((document) => (
-            <div
-              className="knowledgeDocument"
-              key={document.id}
-            >
-              <div className="knowledgeFileIcon">
-                <FileText size={20} />
-              </div>
-
-              <div className="knowledgeFileInfo">
-                <strong>
-                  {document.filename}
-                </strong>
-
-                <span>
-                  {document.file_type.toUpperCase()}
-                </span>
-              </div>
-
-              <div className="knowledgeStatus">
-                <CheckCircle2 size={15} />
-
-                {document.status === "indexed"
-                  ? "Indexat"
-                  : "Pregatit"}
-              </div>
-
-              <button
-                className="knowledgeDeleteButton"
-                onClick={() =>
-                  deleteDocument(document)
-                }
-                disabled={
-                  deletingId === document.id
-                }
-                title="Sterge documentul"
+          documents.map(
+            (document) => (
+              <div
+                className="knowledgeDocument"
+                key={document.id}
               >
-                {deletingId === document.id ? (
-                  <RefreshCw
-                    className="spin"
-                    size={16}
+                <div className="knowledgeFileIcon">
+                  <FileText
+                    size={20}
                   />
-                ) : (
-                  <Trash2 size={16} />
-                )}
-              </button>
-            </div>
-          ))
+                </div>
+
+                <div className="knowledgeFileInfo">
+                  <strong>
+                    {document.filename}
+                  </strong>
+
+                  <span>
+                    {document.file_type.toUpperCase()}
+                  </span>
+                </div>
+
+                <div
+                  className={`knowledgeStatus ${
+                    document.status ===
+                    "indexed"
+                      ? ""
+                      : "knowledgeStatusPending"
+                  }`}
+                >
+                  <CheckCircle2
+                    size={15}
+                  />
+
+                  {document.status ===
+                  "indexed"
+                    ? "Indexat"
+                    : document.status ===
+                      "error"
+                    ? "Eroare"
+                    : "Pregatit"}
+                </div>
+
+                <button
+                  className="knowledgeDeleteButton"
+                  onClick={() =>
+                    deleteDocument(
+                      document
+                    )
+                  }
+                  disabled={
+                    deletingId ===
+                    document.id
+                  }
+                  title="Sterge documentul"
+                >
+                  {deletingId ===
+                  document.id ? (
+                    <RefreshCw
+                      className="spin"
+                      size={16}
+                    />
+                  ) : (
+                    <Trash2
+                      size={16}
+                    />
+                  )}
+                </button>
+              </div>
+            )
+          )
         )}
       </div>
     </>

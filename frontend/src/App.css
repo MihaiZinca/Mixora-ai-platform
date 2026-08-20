@@ -2257,3 +2257,23 @@ button {
 
   cursor: pointer;
 }
+.settingsSaving {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+
+  margin-top: 12px;
+
+  color: #a1a1aa;
+  font-size: 10px;
+}
+.ticketUpdating {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  margin-top: 10px;
+
+  color: #a1a1aa;
+  font-size: 10px;
+}

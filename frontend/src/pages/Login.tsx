@@ -5,9 +5,13 @@ import {
   LogIn,
   RefreshCw,
 } from "lucide-react";
+
 import {
-  FormEvent,
   useState,
+} from "react";
+
+import type {
+  FormEvent,
 } from "react";
 
 type LoginProps = {

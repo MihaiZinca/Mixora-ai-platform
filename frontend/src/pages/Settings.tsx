@@ -44,6 +44,7 @@ function Settings() {
     try {
       setLoading(true);
       setError("");
+      setSuccessMessage("");
 
       const [
         statusResponse,
@@ -81,7 +82,9 @@ function Settings() {
       console.error(err);
 
       setError(
-        "Nu s-a putut realiza conexiunea cu serviciile MIXORA."
+        err instanceof Error
+          ? err.message
+          : "Nu s-a putut realiza conexiunea cu serviciile MIXORA."
       );
     } finally {
       setLoading(false);
@@ -95,6 +98,10 @@ function Settings() {
   const updateResponseMode = async (
     mode: ResponseMode
   ) => {
+    if (mode === responseMode) {
+      return;
+    }
+
     try {
       setSavingMode(true);
       setError("");
@@ -114,8 +121,26 @@ function Settings() {
       );
 
       if (!response.ok) {
+        let message =
+          "Modul de raspuns nu a putut fi salvat.";
+
+        try {
+          const data =
+            await response.json();
+
+          if (
+            typeof data.detail ===
+            "string"
+          ) {
+            message =
+              data.detail;
+          }
+        } catch {
+          // Raspuns non-JSON.
+        }
+
         throw new Error(
-          "Modul de raspuns nu a putut fi salvat."
+          message
         );
       }
 
@@ -133,7 +158,9 @@ function Settings() {
       console.error(err);
 
       setError(
-        "Modul de raspuns nu a putut fi salvat."
+        err instanceof Error
+          ? err.message
+          : "Modul de raspuns nu a putut fi salvat."
       );
     } finally {
       setSavingMode(false);
@@ -175,7 +202,9 @@ function Settings() {
             size={16}
           />
 
-          Reincarca
+          {loading
+            ? "Se reincarca..."
+            : "Reincarca"}
         </button>
       </header>
 
@@ -318,7 +347,10 @@ function Settings() {
                   ? "active"
                   : ""
               }`}
-              disabled={savingMode}
+              disabled={
+                savingMode ||
+                loading
+              }
               onClick={() =>
                 updateResponseMode(
                   "draft"
@@ -357,7 +389,10 @@ function Settings() {
                   ? "active"
                   : ""
               }`}
-              disabled={savingMode}
+              disabled={
+                savingMode ||
+                loading
+              }
               onClick={() =>
                 updateResponseMode(
                   "auto"
@@ -406,6 +441,17 @@ function Settings() {
               </span>
             </div>
           </div>
+
+          {savingMode && (
+            <div className="settingsSaving">
+              <RefreshCw
+                className="spin"
+                size={14}
+              />
+
+              Se salveaza configuratia...
+            </div>
+          )}
         </section>
       </div>
     </>
