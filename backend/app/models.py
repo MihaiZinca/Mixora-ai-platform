@@ -199,3 +199,47 @@ class AppSetting(Base):
         String(255),
         nullable=False,
     )
+
+
+class ActivityLog(Base):
+    __tablename__ = "activity_logs"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        index=True,
+    )
+
+    event_type: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        index=True,
+    )
+
+    title: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    description: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+
+    entity_type: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+
+    entity_id: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        index=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+        index=True,
+    )

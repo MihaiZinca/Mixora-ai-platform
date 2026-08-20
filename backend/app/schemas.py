@@ -113,3 +113,17 @@ class ResponseModeUpdate(BaseModel):
 
 class ResponseModeResponse(BaseModel):
     mode: str
+
+
+class ActivityLogResponse(BaseModel):
+    id: int
+    event_type: str
+    title: str
+    description: str
+    entity_type: str | None
+    entity_id: int | None
+    created_at: datetime
+
+    model_config = ConfigDict(
+        from_attributes=True
+    )

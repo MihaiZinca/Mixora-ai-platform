@@ -1,10 +1,14 @@
 import {
+  Activity,
   AlertTriangle,
+  Bot,
   BookOpen,
   CheckCircle2,
   Clock3,
+  FileText,
   MessageSquare,
   RefreshCw,
+  Settings2,
   TicketCheck,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -33,6 +37,16 @@ type IntentStat = {
   count: number;
 };
 
+type ActivityLog = {
+  id: number;
+  event_type: string;
+  title: string;
+  description: string;
+  entity_type: string | null;
+  entity_id: number | null;
+  created_at: string;
+};
+
 function translateIntent(intent: string) {
   const map: Record<string, string> = {
     "Return request": "Cerere de retur",
@@ -56,13 +70,77 @@ function translatePriority(priority: string) {
   return map[priority] ?? priority;
 }
 
-function Dashboard() {
-  const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [recent, setRecent] = useState<RecentConversation[]>([]);
-  const [intents, setIntents] = useState<IntentStat[]>([]);
+function getActivityIcon(eventType: string) {
+  if (eventType === "conversation_created") {
+    return <MessageSquare size={16} />;
+  }
 
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  if (
+    eventType === "ai_reply_generated" ||
+    eventType === "automatic_reply_sent"
+  ) {
+    return <Bot size={16} />;
+  }
+
+  if (eventType === "manual_reply_sent") {
+    return <MessageSquare size={16} />;
+  }
+
+  if (
+    eventType === "ticket_created" ||
+    eventType === "ticket_status_changed"
+  ) {
+    return <TicketCheck size={16} />;
+  }
+
+  if (
+    eventType === "knowledge_uploaded" ||
+    eventType === "knowledge_deleted"
+  ) {
+    return <FileText size={16} />;
+  }
+
+  if (eventType === "response_mode_changed") {
+    return <Settings2 size={16} />;
+  }
+
+  if (eventType === "conversation_reanalyzed") {
+    return <RefreshCw size={16} />;
+  }
+
+  return <Activity size={16} />;
+}
+
+function formatActivityDate(value: string) {
+  const date = new Date(value);
+
+  return date.toLocaleString("ro-RO", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function Dashboard() {
+  const [stats, setStats] =
+    useState<DashboardStats | null>(null);
+
+  const [recent, setRecent] =
+    useState<RecentConversation[]>([]);
+
+  const [intents, setIntents] =
+    useState<IntentStat[]>([]);
+
+  const [activity, setActivity] =
+    useState<ActivityLog[]>([]);
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [error, setError] =
+    useState("");
 
   const loadDashboard = async () => {
     try {
@@ -73,20 +151,27 @@ function Dashboard() {
         statsResponse,
         recentResponse,
         intentsResponse,
+        activityResponse,
       ] = await Promise.all([
-        fetch("http://localhost:8000/api/dashboard/stats"),
+        fetch(
+          "http://localhost:8000/api/dashboard/stats"
+        ),
         fetch(
           "http://localhost:8000/api/dashboard/recent-conversations"
         ),
         fetch(
           "http://localhost:8000/api/dashboard/intents"
         ),
+        fetch(
+          "http://localhost:8000/api/dashboard/recent-activity"
+        ),
       ]);
 
       if (
         !statsResponse.ok ||
         !recentResponse.ok ||
-        !intentsResponse.ok
+        !intentsResponse.ok ||
+        !activityResponse.ok
       ) {
         throw new Error(
           "Dashboard-ul nu a putut fi incarcat."
@@ -102,9 +187,13 @@ function Dashboard() {
       const intentData: IntentStat[] =
         await intentsResponse.json();
 
+      const activityData: ActivityLog[] =
+        await activityResponse.json();
+
       setStats(statsData);
       setRecent(recentData);
       setIntents(intentData);
+      setActivity(activityData);
     } catch (err) {
       console.error(err);
 
@@ -123,8 +212,14 @@ function Dashboard() {
   if (loading) {
     return (
       <div className="pageState">
-        <RefreshCw className="spin" size={24} />
-        <span>Se incarca Dashboard...</span>
+        <RefreshCw
+          className="spin"
+          size={24}
+        />
+
+        <span>
+          Se incarca Dashboard...
+        </span>
       </div>
     );
   }
@@ -133,7 +228,8 @@ function Dashboard() {
     return (
       <div className="pageState">
         <strong>
-          {error || "Datele nu sunt disponibile."}
+          {error ||
+            "Datele nu sunt disponibile."}
         </strong>
 
         <button
@@ -147,7 +243,9 @@ function Dashboard() {
   }
 
   const maxIntentCount = Math.max(
-    ...intents.map((item) => item.count),
+    ...intents.map(
+      (item) => item.count
+    ),
     1
   );
 
@@ -159,7 +257,9 @@ function Dashboard() {
             MIXORA OVERVIEW
           </p>
 
-          <h2>Dashboard</h2>
+          <h2>
+            Dashboard
+          </h2>
 
           <p className="subtitle">
             Activitatea si performanta platformei MIXORA.
@@ -179,19 +279,25 @@ function Dashboard() {
         <div className="statCard">
           <MessageSquare size={20} />
 
-          <span>Conversatii</span>
+          <span>
+            Conversatii
+          </span>
 
           <strong>
             {stats.conversations}
           </strong>
 
-          <small>Total conversatii</small>
+          <small>
+            Total conversatii
+          </small>
         </div>
 
         <div className="statCard">
           <TicketCheck size={20} />
 
-          <span>Tickets</span>
+          <span>
+            Tickets
+          </span>
 
           <strong>
             {stats.tickets_total}
@@ -244,7 +350,7 @@ function Dashboard() {
               </p>
 
               <h3>
-                Activitate recenta
+                Conversatii recente
               </h3>
             </div>
           </div>
@@ -254,52 +360,64 @@ function Dashboard() {
               Nu exista conversatii.
             </div>
           ) : (
-            recent.map((conversation) => (
-              <div
-                className="dashboardConversation"
-                key={conversation.id}
-              >
-                <div className="avatar">
-                  {conversation.name
-                    .charAt(0)
-                    .toUpperCase()}
-                </div>
+            recent.map(
+              (conversation) => (
+                <div
+                  className="dashboardConversation"
+                  key={
+                    conversation.id
+                  }
+                >
+                  <div className="avatar">
+                    {conversation.name
+                      .charAt(0)
+                      .toUpperCase()}
+                  </div>
 
-                <div className="dashboardConversationInfo">
-                  <strong>
-                    {conversation.name}
-                  </strong>
+                  <div className="dashboardConversationInfo">
+                    <strong>
+                      {
+                        conversation.name
+                      }
+                    </strong>
 
-                  <span>
-                    {conversation.subject}
-                  </span>
-                </div>
+                    <span>
+                      {
+                        conversation.subject
+                      }
+                    </span>
+                  </div>
 
-                <div className="dashboardConversationMeta">
-                  <span>
-                    {translateIntent(
-                      conversation.intent
+                  <div className="dashboardConversationMeta">
+                    <span>
+                      {translateIntent(
+                        conversation.intent
+                      )}
+                    </span>
+
+                    <small>
+                      {
+                        conversation.confidence
+                      }
+                      %
+                    </small>
+                  </div>
+
+                  <span
+                    className={`dashboardPriority ${
+                      conversation.priority ===
+                      "High"
+                        ? "dashboardPriorityHigh"
+                        : ""
+                    }`}
+                  >
+                    {translatePriority(
+                      conversation.priority
                     )}
                   </span>
-
-                  <small>
-                    {conversation.confidence}%
-                  </small>
                 </div>
-
-                <span
-                  className={`dashboardPriority ${
-                    conversation.priority === "High"
-                      ? "dashboardPriorityHigh"
-                      : ""
-                  }`}
-                >
-                  {translatePriority(
-                    conversation.priority
-                  )}
-                </span>
-              </div>
-            ))
+              )
+            )
           )}
         </div>
 
@@ -323,7 +441,9 @@ function Dashboard() {
           ) : (
             intents.map((item) => {
               const width =
-                (item.count / maxIntentCount) * 100;
+                (item.count /
+                  maxIntentCount) *
+                100;
 
               return (
                 <div
@@ -332,7 +452,9 @@ function Dashboard() {
                 >
                   <div className="intentRowTop">
                     <span>
-                      {translateIntent(item.intent)}
+                      {translateIntent(
+                        item.intent
+                      )}
                     </span>
 
                     <strong>
@@ -360,6 +482,65 @@ function Dashboard() {
           <div className="dashboardPanelHeader">
             <div>
               <p className="eyebrow">
+                RECENT ACTIVITY
+              </p>
+
+              <h3>
+                Activitate recenta
+              </h3>
+            </div>
+
+            <span className="activityCount">
+              {activity.length}
+            </span>
+          </div>
+
+          {activity.length === 0 ? (
+            <div className="dashboardEmpty">
+              Nu exista activitate recenta.
+            </div>
+          ) : (
+            <div className="activityList">
+              {activity.map(
+                (item) => (
+                  <div
+                    className="activityItem"
+                    key={item.id}
+                  >
+                    <div className="activityIcon">
+                      {getActivityIcon(
+                        item.event_type
+                      )}
+                    </div>
+
+                    <div className="activityInfo">
+                      <strong>
+                        {item.title}
+                      </strong>
+
+                      <span>
+                        {
+                          item.description
+                        }
+                      </span>
+
+                      <small>
+                        {formatActivityDate(
+                          item.created_at
+                        )}
+                      </small>
+                    </div>
+                  </div>
+                )
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="panel">
+          <div className="dashboardPanelHeader">
+            <div>
+              <p className="eyebrow">
                 TICKET PIPELINE
               </p>
 
@@ -372,7 +553,9 @@ function Dashboard() {
           <div className="dashboardStatusRow">
             <div>
               <Clock3 size={17} />
-              <span>Deschise</span>
+              <span>
+                Deschise
+              </span>
             </div>
 
             <strong>
@@ -383,18 +566,26 @@ function Dashboard() {
           <div className="dashboardStatusRow">
             <div>
               <RefreshCw size={17} />
-              <span>In lucru</span>
+
+              <span>
+                In lucru
+              </span>
             </div>
 
             <strong>
-              {stats.tickets_in_progress}
+              {
+                stats.tickets_in_progress
+              }
             </strong>
           </div>
 
           <div className="dashboardStatusRow">
             <div>
               <CheckCircle2 size={17} />
-              <span>Rezolvate</span>
+
+              <span>
+                Rezolvate
+              </span>
             </div>
 
             <strong>
@@ -402,7 +593,9 @@ function Dashboard() {
             </strong>
           </div>
         </div>
+      </section>
 
+      <section className="dashboardGrid">
         <div className="panel">
           <div className="dashboardPanelHeader">
             <div>
@@ -422,7 +615,9 @@ function Dashboard() {
               FastAPI
             </div>
 
-            <strong>ONLINE</strong>
+            <strong>
+              ONLINE
+            </strong>
           </div>
 
           <div className="systemService">
@@ -431,7 +626,9 @@ function Dashboard() {
               PostgreSQL
             </div>
 
-            <strong>ONLINE</strong>
+            <strong>
+              ONLINE
+            </strong>
           </div>
 
           <div className="systemService">
@@ -440,7 +637,9 @@ function Dashboard() {
               Qdrant
             </div>
 
-            <strong>ONLINE</strong>
+            <strong>
+              ONLINE
+            </strong>
           </div>
 
           <div className="systemService">
@@ -449,7 +648,71 @@ function Dashboard() {
               RAG Engine
             </div>
 
-            <strong>READY</strong>
+            <strong>
+              READY
+            </strong>
+          </div>
+        </div>
+
+        <div className="panel">
+          <div className="dashboardPanelHeader">
+            <div>
+              <p className="eyebrow">
+                PLATFORM
+              </p>
+
+              <h3>
+                Rezumat operational
+              </h3>
+            </div>
+          </div>
+
+          <div className="dashboardStatusRow">
+            <div>
+              <MessageSquare
+                size={17}
+              />
+
+              <span>
+                Conversatii procesate
+              </span>
+            </div>
+
+            <strong>
+              {stats.conversations}
+            </strong>
+          </div>
+
+          <div className="dashboardStatusRow">
+            <div>
+              <TicketCheck
+                size={17}
+              />
+
+              <span>
+                Tichete totale
+              </span>
+            </div>
+
+            <strong>
+              {stats.tickets_total}
+            </strong>
+          </div>
+
+          <div className="dashboardStatusRow">
+            <div>
+              <BookOpen size={17} />
+
+              <span>
+                Documente RAG
+              </span>
+            </div>
+
+            <strong>
+              {
+                stats.knowledge_documents
+              }
+            </strong>
           </div>
         </div>
       </section>

@@ -22,6 +22,7 @@ from app.database import (
     get_db,
 )
 from app.models import (
+    ActivityLog,
     AppSetting,
     Conversation,
     ConversationReply,
@@ -34,6 +35,7 @@ from app.rag import (
     search_knowledge,
 )
 from app.schemas import (
+    ActivityLogResponse,
     ConversationCreate,
     ConversationResponse,
     DashboardStatsResponse,
@@ -60,6 +62,25 @@ KNOWLEDGE_DIR.mkdir(
     parents=True,
     exist_ok=True,
 )
+
+
+async def log_activity(
+    db: AsyncSession,
+    event_type: str,
+    title: str,
+    description: str,
+    entity_type: str | None = None,
+    entity_id: int | None = None,
+):
+    activity = ActivityLog(
+        event_type=event_type,
+        title=title,
+        description=description,
+        entity_type=entity_type,
+        entity_id=entity_id,
+    )
+
+    db.add(activity)
 
 
 @asynccontextmanager
@@ -189,6 +210,12 @@ async def update_response_mode(
 
     setting = result.scalar_one_or_none()
 
+    old_mode = (
+        setting.value
+        if setting is not None
+        else "draft"
+    )
+
     if setting is None:
         setting = AppSetting(
             key="response_mode",
@@ -198,6 +225,17 @@ async def update_response_mode(
         db.add(setting)
     else:
         setting.value = payload.mode
+
+    await log_activity(
+        db=db,
+        event_type="response_mode_changed",
+        title="Mod AI schimbat",
+        description=(
+            f"Modul de raspuns a fost schimbat "
+            f"din {old_mode} in {payload.mode}."
+        ),
+        entity_type="setting",
+    )
 
     await db.commit()
     await db.refresh(setting)
@@ -247,8 +285,19 @@ async def create_conversation(
 
     db.add(conversation)
 
-    await db.commit()
-    await db.refresh(conversation)
+    await db.flush()
+
+    await log_activity(
+        db=db,
+        event_type="conversation_created",
+        title="Conversatie creata",
+        description=(
+            f"A fost creata o conversatie pentru "
+            f"{conversation.name}."
+        ),
+        entity_type="conversation",
+        entity_id=conversation.id,
+    )
 
     settings_result = await db.execute(
         select(AppSetting).where(
@@ -308,7 +357,20 @@ async def create_conversation(
 
         db.add(automatic_reply)
 
-        await db.commit()
+        await log_activity(
+            db=db,
+            event_type="automatic_reply_sent",
+            title="Raspuns automat MIXORA",
+            description=(
+                f"MIXORA a generat automat un raspuns "
+                f"pentru {conversation.name}."
+            ),
+            entity_type="conversation",
+            entity_id=conversation.id,
+        )
+
+    await db.commit()
+    await db.refresh(conversation)
 
     return conversation
 
@@ -361,6 +423,20 @@ async def generate_conversation_reply(
         knowledge_context=knowledge_context,
     )
 
+    await log_activity(
+        db=db,
+        event_type="ai_reply_generated",
+        title="Draft AI generat",
+        description=(
+            f"MIXORA a generat un draft AI pentru "
+            f"{conversation.name}."
+        ),
+        entity_type="conversation",
+        entity_id=conversation.id,
+    )
+
+    await db.commit()
+
     return GeneratedReplyResponse(
         reply=reply,
         source=knowledge_source,
@@ -397,6 +473,18 @@ async def reanalyze_conversation(
     conversation.priority = analysis.priority
     conversation.sentiment = analysis.sentiment
     conversation.confidence = analysis.confidence
+
+    await log_activity(
+        db=db,
+        event_type="conversation_reanalyzed",
+        title="Conversatie reanalizata",
+        description=(
+            f"Conversatia lui {conversation.name} "
+            f"a fost reanalizata de MIXORA."
+        ),
+        entity_type="conversation",
+        entity_id=conversation.id,
+    )
 
     await db.commit()
     await db.refresh(conversation)
@@ -483,6 +571,18 @@ async def send_conversation_reply(
     )
 
     db.add(reply)
+
+    await log_activity(
+        db=db,
+        event_type="manual_reply_sent",
+        title="Raspuns manual trimis",
+        description=(
+            f"A fost trimis un raspuns manual "
+            f"pentru {conversation.name}."
+        ),
+        entity_type="conversation",
+        entity_id=conversation.id,
+    )
 
     await db.commit()
     await db.refresh(reply)
@@ -610,8 +710,7 @@ async def upload_knowledge_document(
 
     db.add(document)
 
-    await db.commit()
-    await db.refresh(document)
+    await db.flush()
 
     try:
         index_document(
@@ -635,6 +734,18 @@ async def upload_knowledge_document(
         ) from exc
 
     document.status = "indexed"
+
+    await log_activity(
+        db=db,
+        event_type="knowledge_uploaded",
+        title="Document indexat",
+        description=(
+            f"Documentul {document.filename} "
+            f"a fost adaugat in Knowledge Base."
+        ),
+        entity_type="knowledge_document",
+        entity_id=document.id,
+    )
 
     await db.commit()
     await db.refresh(document)
@@ -684,6 +795,8 @@ async def delete_knowledge_document(
             detail="Documentul nu a fost gasit.",
         )
 
+    filename = document.filename
+
     try:
         delete_document_vectors(
             document_id=document.id
@@ -705,13 +818,25 @@ async def delete_knowledge_document(
     if file_path.exists():
         file_path.unlink()
 
+    await log_activity(
+        db=db,
+        event_type="knowledge_deleted",
+        title="Document sters",
+        description=(
+            f"Documentul {filename} "
+            f"a fost eliminat din Knowledge Base."
+        ),
+        entity_type="knowledge_document",
+        entity_id=document.id,
+    )
+
     await db.delete(document)
     await db.commit()
 
     return {
         "status": "sters",
         "document_id": document_id,
-        "filename": document.filename,
+        "filename": filename,
         "message": (
             "Documentul a fost sters cu succes."
         ),
@@ -845,6 +970,20 @@ async def create_ticket_from_conversation(
 
     db.add(ticket)
 
+    await db.flush()
+
+    await log_activity(
+        db=db,
+        event_type="ticket_created",
+        title="Tichet creat",
+        description=(
+            f"Tichetul #{ticket.id} a fost creat "
+            f"pentru {conversation.name}."
+        ),
+        entity_type="ticket",
+        entity_id=ticket.id,
+    )
+
     await db.commit()
     await db.refresh(ticket)
 
@@ -888,12 +1027,62 @@ async def update_ticket_status(
             detail="Tichetul nu a fost gasit.",
         )
 
+    old_status = ticket.status
+
     ticket.status = payload.status
+
+    await log_activity(
+        db=db,
+        event_type="ticket_status_changed",
+        title="Status tichet schimbat",
+        description=(
+            f"Tichetul #{ticket.id} a trecut "
+            f"din {old_status} in {payload.status}."
+        ),
+        entity_type="ticket",
+        entity_id=ticket.id,
+    )
 
     await db.commit()
     await db.refresh(ticket)
 
     return ticket
+
+
+@app.get(
+    "/api/activity",
+    response_model=list[ActivityLogResponse],
+)
+async def get_activity(
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(ActivityLog)
+        .order_by(
+            ActivityLog.created_at.desc()
+        )
+        .limit(50)
+    )
+
+    return result.scalars().all()
+
+
+@app.get(
+    "/api/dashboard/recent-activity",
+    response_model=list[ActivityLogResponse],
+)
+async def get_recent_activity(
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(ActivityLog)
+        .order_by(
+            ActivityLog.created_at.desc()
+        )
+        .limit(8)
+    )
+
+    return result.scalars().all()
 
 
 @app.get(
