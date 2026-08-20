@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
+from dotenv import load_dotenv
 
 from fastapi import (
     Depends,
@@ -11,6 +12,16 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+import base64
+import hashlib
+import hmac
+import json
+import os
+import time
+
+from fastapi import Request
+from fastapi.responses import JSONResponse
 
 from app.ai import (
     analyze_message,
@@ -49,7 +60,12 @@ from app.schemas import (
     ResponseModeUpdate,
     TicketResponse,
     TicketStatusUpdate,
+    AuthLoginRequest,
+    AuthLoginResponse,
+    AuthMeResponse,
 )
+
+load_dotenv()
 
 
 KNOWLEDGE_DIR = (
@@ -62,6 +78,131 @@ KNOWLEDGE_DIR.mkdir(
     parents=True,
     exist_ok=True,
 )
+AUTH_USERNAME = os.getenv(
+    "MIXORA_ADMIN_USERNAME",
+    "admin",
+)
+
+AUTH_PASSWORD = os.getenv(
+    "MIXORA_ADMIN_PASSWORD",
+    "mixora",
+)
+
+AUTH_SECRET = os.getenv(
+    "MIXORA_AUTH_SECRET",
+    "mixora-development-secret-change-me",
+)
+
+TOKEN_LIFETIME_SECONDS = 8 * 60 * 60
+
+
+def encode_base64(value: bytes) -> str:
+    return (
+        base64.urlsafe_b64encode(value)
+        .decode("utf-8")
+        .rstrip("=")
+    )
+
+
+def decode_base64(value: str) -> bytes:
+    padding = "=" * (
+        (4 - len(value) % 4) % 4
+    )
+
+    return base64.urlsafe_b64decode(
+        value + padding
+    )
+
+
+def create_access_token(
+    username: str,
+) -> str:
+    payload = {
+        "sub": username,
+        "exp": (
+            int(time.time())
+            + TOKEN_LIFETIME_SECONDS
+        ),
+    }
+
+    payload_json = json.dumps(
+        payload,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+    encoded_payload = encode_base64(
+        payload_json
+    )
+
+    signature = hmac.new(
+        AUTH_SECRET.encode("utf-8"),
+        encoded_payload.encode("utf-8"),
+        hashlib.sha256,
+    ).digest()
+
+    encoded_signature = encode_base64(
+        signature
+    )
+
+    return (
+        f"{encoded_payload}."
+        f"{encoded_signature}"
+    )
+
+
+def verify_access_token(
+    token: str,
+) -> dict | None:
+    try:
+        encoded_payload, provided_signature = (
+            token.split(".", 1)
+        )
+
+        expected_signature = encode_base64(
+            hmac.new(
+                AUTH_SECRET.encode(
+                    "utf-8"
+                ),
+                encoded_payload.encode(
+                    "utf-8"
+                ),
+                hashlib.sha256,
+            ).digest()
+        )
+
+        if not hmac.compare_digest(
+            provided_signature,
+            expected_signature,
+        ):
+            return None
+
+        payload = json.loads(
+            decode_base64(
+                encoded_payload
+            ).decode("utf-8")
+        )
+
+        expiration = payload.get(
+            "exp"
+        )
+
+        if (
+            not expiration
+            or int(expiration)
+            < int(time.time())
+        ):
+            return None
+
+        username = payload.get("sub")
+
+        if not username:
+            return None
+
+        return payload
+
+    except Exception:
+        return None
+
 
 
 async def log_activity(
@@ -112,6 +253,81 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def authentication_middleware(
+    request: Request,
+    call_next,
+):
+    path = request.url.path
+
+    public_paths = {
+        "/health",
+        "/api/auth/login",
+        "/docs",
+        "/openapi.json",
+        "/redoc",
+    }
+
+    if (
+        request.method == "OPTIONS"
+        or path in public_paths
+        or path.startswith(
+            "/docs/"
+        )
+    ):
+        return await call_next(
+            request
+        )
+
+    if path.startswith("/api/"):
+        authorization = (
+            request.headers.get(
+                "Authorization"
+            )
+        )
+
+        if (
+            not authorization
+            or not authorization.startswith(
+                "Bearer "
+            )
+        ):
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "detail": (
+                        "Autentificarea este necesara."
+                    )
+                },
+            )
+
+        token = authorization[
+            len("Bearer "):
+        ].strip()
+
+        payload = verify_access_token(
+            token
+        )
+
+        if payload is None:
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "detail": (
+                        "Sesiunea a expirat "
+                        "sau token-ul nu este valid."
+                    )
+                },
+            )
+
+        request.state.username = (
+            payload["sub"]
+        )
+
+    return await call_next(
+        request
+    )
+
 
 @app.get("/health")
 async def health():
@@ -120,6 +336,61 @@ async def health():
         "service": "mixora-api",
         "version": "0.1.0",
     }
+@app.post(
+    "/api/auth/login",
+    response_model=AuthLoginResponse,
+)
+async def login(
+    payload: AuthLoginRequest,
+):
+    username_valid = (
+        hmac.compare_digest(
+            payload.username.strip(),
+            AUTH_USERNAME,
+        )
+    )
+
+    password_valid = (
+        hmac.compare_digest(
+            payload.password,
+            AUTH_PASSWORD,
+        )
+    )
+
+    if (
+        not username_valid
+        or not password_valid
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail=(
+                "Utilizatorul sau parola "
+                "sunt incorecte."
+            ),
+        )
+
+    token = create_access_token(
+        AUTH_USERNAME
+    )
+
+    return AuthLoginResponse(
+        access_token=token,
+        token_type="bearer",
+        operator_name="Administrator",
+    )
+
+
+@app.get(
+    "/api/auth/me",
+    response_model=AuthMeResponse,
+)
+async def get_current_operator(
+    request: Request,
+):
+    return AuthMeResponse(
+        username=request.state.username,
+        operator_name="Administrator",
+    )
 
 
 @app.get("/api/system/status")

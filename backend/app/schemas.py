@@ -9,6 +9,29 @@ from pydantic import (
 )
 
 
+class AuthLoginRequest(BaseModel):
+    username: str = Field(
+        min_length=1,
+        max_length=100,
+    )
+
+    password: str = Field(
+        min_length=1,
+        max_length=255,
+    )
+
+
+class AuthLoginResponse(BaseModel):
+    access_token: str
+    token_type: str
+    operator_name: str
+
+
+class AuthMeResponse(BaseModel):
+    username: str
+    operator_name: str
+
+
 class ConversationCreate(BaseModel):
     name: str = Field(
         min_length=2,
@@ -31,7 +54,10 @@ class ConversationCreate(BaseModel):
         "message",
     )
     @classmethod
-    def strip_text(cls, value: str):
+    def strip_text(
+        cls,
+        value: str,
+    ):
         value = value.strip()
 
         if not value:
@@ -139,7 +165,10 @@ class ReplyCreate(BaseModel):
 
     @field_validator("content")
     @classmethod
-    def clean_content(cls, value: str):
+    def clean_content(
+        cls,
+        value: str,
+    ):
         value = value.strip()
 
         if not value:
