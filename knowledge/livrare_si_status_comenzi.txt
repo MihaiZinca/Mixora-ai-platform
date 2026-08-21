@@ -1,0 +1,20 @@
+Politica de livrare si status comenzi
+
+Dupa plasarea unei comenzi, clientul trebuie sa primeasca un mesaj de confirmare pe adresa de email folosita la comanda.
+
+Daca mesajul de confirmare nu a fost primit, clientul trebuie sa verifice si folderul Spam sau Promotions.
+
+Pentru verificarea statusului unei comenzi, clientul trebuie sa furnizeze numarul comenzii sau adresa de email folosita la plasarea acesteia.
+
+Statusurile unei comenzi pot fi:
+- confirmata
+- in procesare
+- predata curierului
+- in curs de livrare
+- livrata
+
+Dupa predarea coletului catre curier, clientul poate primi informatii de urmarire a livrarii.
+
+Daca livrarea depaseste termenul estimat, solicitarea poate fi verificata folosind numarul comenzii.
+
+Daca un client nu a primit confirmarea comenzii, acest lucru nu inseamna automat ca aceasta nu a fost inregistrata. Comanda trebuie verificata in sistem pe baza datelor clientului.

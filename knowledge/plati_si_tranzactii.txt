@@ -1,0 +1,19 @@
+Politica de plati si tranzactii
+
+Platile pot fi procesate prin metodele disponibile la finalizarea comenzii.
+
+Daca o plata este respinsa, clientul trebuie sa verifice datele cardului, disponibilitatea fondurilor si eventualele restrictii aplicate de banca emitenta.
+
+O plata respinsa nu confirma automat o comanda.
+
+Daca suma apare blocata sau debitata, dar comanda nu este confirmata, solicitarea trebuie verificata inainte de repetarea platii.
+
+Pentru identificarea unei tranzactii sunt utile:
+- numarul comenzii
+- adresa de email folosita la comanda
+- data aproximativa a platii
+- metoda de plata folosita
+
+Clientii nu trebuie sa trimita prin mesaje date complete ale cardului, codul CVV sau alte informatii bancare sensibile.
+
+Pentru probleme de facturare se aplica politica separata de facturare.

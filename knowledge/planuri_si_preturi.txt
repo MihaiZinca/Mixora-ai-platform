@@ -1,0 +1,19 @@
+Planuri si informatii comerciale
+
+Clientii interesati de serviciile disponibile pot solicita informatii despre planuri, beneficii si optiunile potrivite nevoilor lor.
+
+Planul Premium este destinat clientilor care doresc acces la functionalitati si beneficii suplimentare fata de oferta standard.
+
+Informatiile comerciale trebuie prezentate clar si fara promisiuni care nu sunt confirmate in documentatia disponibila.
+
+Daca pretul exact al unui plan nu este mentionat in Knowledge Base, raspunsul nu trebuie sa inventeze o valoare.
+
+In aceasta situatie, clientului i se poate comunica faptul ca detaliile comerciale exacte trebuie confirmate inainte de achizitie.
+
+Pentru recomandarea unui plan pot fi solicitate informatii despre:
+- nevoile clientului
+- functionalitatile dorite
+- tipul de utilizare
+- numarul estimat de utilizatori
+
+Daca exista o perioada de test sau o oferta promotionala, aceasta trebuie mentionata doar daca este confirmata in documentatia interna.
