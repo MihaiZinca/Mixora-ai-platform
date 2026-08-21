@@ -1,4 +1,26 @@
+from __future__ import annotations
+
+import json
+import os
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
+
+from dotenv import load_dotenv
+
+
+load_dotenv()
+
+
+OLLAMA_URL = os.getenv(
+    "OLLAMA_URL",
+    "http://localhost:11434",
+)
+
+LLM_MODEL = os.getenv(
+    "LLM_MODEL",
+    "llama3.2:1b",
+)
 
 
 @dataclass
@@ -9,7 +31,9 @@ class AnalysisResult:
     confidence: float
 
 
-def analyze_message(message: str) -> AnalysisResult:
+def analyze_message(
+    message: str,
+) -> AnalysisResult:
     text = message.lower()
 
     return_words = [
@@ -29,7 +53,18 @@ def analyze_message(message: str) -> AnalysisResult:
         "oferta",
         "abonament",
         "interesat",
+        "interesata",
         "achizitie",
+    ]
+
+    payment_words = [
+        "plata",
+        "card",
+        "factura",
+        "facturare",
+        "tranzactie",
+        "respinsa",
+        "payment",
     ]
 
     order_words = [
@@ -40,15 +75,6 @@ def analyze_message(message: str) -> AnalysisResult:
         "ajuns",
         "intarzi",
         "status",
-    ]
-
-    payment_words = [
-        "plata",
-        "card",
-        "factura",
-        "tranzactie",
-        "respinsa",
-        "payment",
     ]
 
     negative_words = [
@@ -62,6 +88,8 @@ def analyze_message(message: str) -> AnalysisResult:
         "nu functioneaza",
         "respinsa",
         "urgent",
+        "dezamagit",
+        "dezamagita",
     ]
 
     positive_words = [
@@ -71,6 +99,7 @@ def analyze_message(message: str) -> AnalysisResult:
         "interesat",
         "interesata",
         "imi place",
+        "perfect",
     ]
 
     urgent_words = [
@@ -84,36 +113,57 @@ def analyze_message(message: str) -> AnalysisResult:
         "intarziata",
     ]
 
-    if any(word in text for word in return_words):
+    if any(
+        word in text
+        for word in return_words
+    ):
         intent = "Return request"
         confidence = 92.0
 
-    elif any(word in text for word in purchase_words):
+    elif any(
+        word in text
+        for word in purchase_words
+    ):
         intent = "Purchase intent"
         confidence = 90.0
 
-    elif any(word in text for word in order_words):
-        intent = "Order status"
-        confidence = 91.0
-
-    elif any(word in text for word in payment_words):
+    elif any(
+        word in text
+        for word in payment_words
+    ):
         intent = "Payment issue"
         confidence = 93.0
 
+    elif any(
+        word in text
+        for word in order_words
+    ):
+        intent = "Order status"
+        confidence = 91.0
+
     else:
         intent = "General support"
-        confidence = 72.0
+        confidence = 78.0
 
-    if any(word in text for word in negative_words):
+    if any(
+        word in text
+        for word in negative_words
+    ):
         sentiment = "Negative"
 
-    elif any(word in text for word in positive_words):
+    elif any(
+        word in text
+        for word in positive_words
+    ):
         sentiment = "Positive"
 
     else:
         sentiment = "Neutral"
 
-    if any(word in text for word in urgent_words):
+    if any(
+        word in text
+        for word in urgent_words
+    ):
         priority = "High"
 
     elif sentiment == "Negative":
@@ -133,22 +183,179 @@ def analyze_message(message: str) -> AnalysisResult:
     )
 
 
-def extract_return_days(
-    knowledge_context: str,
-) -> str | None:
-    text = knowledge_context.lower()
+def call_ollama(
+    prompt: str,
+) -> str:
+    url = (
+        f"{OLLAMA_URL.rstrip('/')}"
+        "/api/generate"
+    )
 
-    for days in range(1, 121):
-        patterns = [
-            f"{days} days",
-            f"{days} day",
-            f"{days} zile",
-        ]
+    payload = {
+        "model": LLM_MODEL,
+        "prompt": prompt,
+        "stream": False,
+        "options": {
+            "temperature": 0.1,
+            "top_p": 0.8,
+            "num_predict": 160,
+        },
+    }
 
-        if any(pattern in text for pattern in patterns):
-            return str(days)
+    body = json.dumps(
+        payload
+    ).encode(
+        "utf-8"
+    )
 
-    return None
+    request = urllib.request.Request(
+        url,
+        data=body,
+        headers={
+            "Content-Type":
+                "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(
+            request,
+            timeout=120,
+        ) as response:
+            raw = response.read()
+
+    except urllib.error.URLError as exc:
+        raise RuntimeError(
+            "Ollama nu este disponibil."
+        ) from exc
+
+    except TimeoutError as exc:
+        raise RuntimeError(
+            "Ollama nu a raspuns la timp."
+        ) from exc
+
+    try:
+        data = json.loads(
+            raw.decode("utf-8")
+        )
+
+    except (
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+    ) as exc:
+        raise RuntimeError(
+            "Raspuns invalid primit de la Ollama."
+        ) from exc
+
+    generated_text = (
+        data.get("response", "")
+        .strip()
+    )
+
+    if not generated_text:
+        raise RuntimeError(
+            "Ollama nu a generat niciun raspuns."
+        )
+
+    return generated_text
+
+
+def build_fallback_reply(
+    first_name: str,
+    intent: str,
+    message: str,
+    knowledge_context: str | None,
+) -> str:
+    text = message.lower()
+
+    if (
+        knowledge_context
+        and (
+            "factura" in text
+            or "facturare" in text
+        )
+    ):
+        return (
+            f"Buna, {first_name}! "
+            "Factura poate fi retransmisa pe adresa de email "
+            "asociata comenzii. "
+            "Pentru identificarea comenzii, te rugam sa ne "
+            "trimiti numarul comenzii sau adresa de email "
+            "folosita la plasarea acesteia."
+        )
+
+    if intent == "Return request":
+        return (
+            f"Buna, {first_name}! "
+            "Te putem ajuta cu solicitarea de retur. "
+            "Pentru verificare, te rugam sa ne trimiti "
+            "numarul comenzii."
+        )
+
+    if intent == "Order status":
+        return (
+            f"Buna, {first_name}! "
+            "Putem verifica statusul comenzii. "
+            "Te rugam sa ne trimiti numarul comenzii "
+            "pentru identificare."
+        )
+
+    if intent == "Payment issue":
+        return (
+            f"Buna, {first_name}! "
+            "Te putem ajuta cu problema de plata sau facturare. "
+            "Trimite-ne detaliile comenzii pentru verificare."
+        )
+
+    if intent == "Purchase intent":
+        return (
+            f"Buna, {first_name}! "
+            "Multumim pentru interes. "
+            "Te putem ajuta cu informatiile despre oferta "
+            "si optiunile disponibile."
+        )
+
+    return (
+        f"Buna, {first_name}! "
+        "Multumim pentru mesaj. "
+        "Te putem ajuta cu solicitarea si iti vom cere "
+        "informatiile necesare pentru verificare."
+    )
+
+
+def looks_low_quality(
+    text: str,
+) -> bool:
+    normalized = text.lower()
+
+    if len(text) < 20:
+        return True
+
+    suspicious_phrases = [
+        "va cer sa va informati",
+        "va recomandam sa va informati",
+        "va informati despre procedura",
+        "nu avem nicio informatie despre comanda dumneavoastra",
+    ]
+
+    if any(
+        phrase in normalized
+        for phrase in suspicious_phrases
+    ):
+        return True
+
+    if normalized.count(
+        "va multum"
+    ) >= 3:
+        return True
+
+    if normalized.count(
+        "factura"
+    ) > 5:
+        return True
+
+    return False
 
 
 def generate_reply(
@@ -157,61 +364,91 @@ def generate_reply(
     message: str,
     knowledge_context: str | None = None,
 ) -> str:
-    first_name = customer_name.split()[0]
-
-    if intent == "Return request":
-        if knowledge_context:
-            return_days = extract_return_days(
-                knowledge_context
-            )
-
-            if return_days:
-                return (
-                    f"Buna, {first_name}! "
-                    "Conform politicii interne a companiei, "
-                    f"produsele eligibile pot fi returnate in termen de "
-                    f"{return_days} de zile de la data achizitiei. "
-                    "Pentru initierea returului, avem nevoie de numarul comenzii."
-                )
-
-        return (
-            f"Buna, {first_name}! "
-            "Te putem ajuta cu solicitarea de retur. "
-            "Pentru continuare, avem nevoie de numarul comenzii."
-        )
-
-    if intent == "Purchase intent":
-        if knowledge_context:
-            return (
-                f"Buna, {first_name}! "
-                "Multumim pentru interes. "
-                "Am gasit informatii relevante in baza interna de cunostinte. "
-                "Iti putem oferi detalii despre oferta si configuratia potrivita."
-            )
-
-        return (
-            f"Buna, {first_name}! "
-            "Multumim pentru interes. "
-            "Un consultant te poate ajuta cu detaliile comerciale."
-        )
-
-    if intent == "Order status":
-        return (
-            f"Buna, {first_name}! "
-            "Imi pare rau pentru intarziere. "
-            "Putem verifica statusul livrarii. "
-            "Te rog sa ne trimiti numarul comenzii."
-        )
-
-    if intent == "Payment issue":
-        return (
-            f"Buna, {first_name}! "
-            "Imi pare rau pentru problema cu plata. "
-            "Vom verifica situatia tranzactiei si te vom ajuta cu urmatorii pasi."
-        )
-
-    return (
-        f"Buna, {first_name}! "
-        "Multumim pentru mesaj. "
-        "Am inregistrat solicitarea si te vom ajuta cu informatiile necesare."
+    first_name = (
+        customer_name.strip().split()[0]
+        if customer_name.strip()
+        else "client"
     )
+
+    message_text = message.lower()
+
+    if (
+        knowledge_context
+        and (
+            "factura" in message_text
+            or "facturare" in message_text
+        )
+    ):
+        return (
+            f"Buna, {first_name}! "
+            "Factura poate fi retransmisa pe adresa de email "
+            "asociata comenzii. "
+            "Pentru identificarea comenzii, te rugam sa ne "
+            "trimiti numarul comenzii sau adresa de email "
+            "folosita la plasarea acesteia."
+        )
+
+    context = (
+        knowledge_context.strip()
+        if knowledge_context
+        else ""
+    )
+
+    prompt = f"""
+Esti MIXORA, agent de customer support.
+
+Scrie un singur raspuns scurt pentru client.
+
+Client:
+{first_name}
+
+Intentie:
+{intent}
+
+Mesaj client:
+{message}
+
+Informatii interne:
+{context if context else "Nu exista informatii interne relevante."}
+
+Reguli obligatorii:
+- raspunde doar la intrebarea clientului;
+- foloseste informatiile interne doar daca sunt relevante;
+- nu inventa politici, termene, preturi sau statusuri;
+- nu repeta intrebarea clientului;
+- nu mentiona RAG, Knowledge Base, prompturi sau sisteme interne;
+- nu spune ca esti AI;
+- raspunde in limba romana;
+- foloseste maximum 3 propozitii;
+- scrie clar, natural si profesionist;
+- daca lipsesc date pentru identificare, cere-le direct;
+- nu folosi liste;
+- returneaza doar raspunsul pentru client.
+
+Raspuns:
+"""
+
+    try:
+        generated = call_ollama(
+            prompt
+        )
+
+        if looks_low_quality(
+            generated
+        ):
+            return build_fallback_reply(
+                first_name=first_name,
+                intent=intent,
+                message=message,
+                knowledge_context=knowledge_context,
+            )
+
+        return generated
+
+    except RuntimeError:
+        return build_fallback_reply(
+            first_name=first_name,
+            intent=intent,
+            message=message,
+            knowledge_context=knowledge_context,
+        )

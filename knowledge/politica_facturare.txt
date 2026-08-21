@@ -1,0 +1,9 @@
+Politica de facturare MIXORA Demo
+
+Factura pentru fiecare comanda este transmisa electronic pe adresa de email asociata comenzii.
+
+Daca un client nu a primit factura, aceasta poate fi retransmisa la cerere.
+
+Pentru identificarea comenzii, clientul trebuie sa furnizeze numarul comenzii sau adresa de email folosita la plasarea acesteia.
+
+Facturile sunt disponibile pentru retransmitere dupa confirmarea datelor comenzii.

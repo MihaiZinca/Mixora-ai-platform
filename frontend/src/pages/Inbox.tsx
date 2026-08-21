@@ -4,6 +4,7 @@ import {
   Database,
   FileText,
   Globe2,
+  Mail,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -174,11 +175,21 @@ function getChannelClass(channel?: string) {
 }
 
 function ChannelIcon({
+  channel,
   size = 12,
 }: {
   channel?: string;
   size?: number;
 }) {
+  const normalized =
+    normalizeChannel(channel);
+
+  if (normalized === "email") {
+    return (
+      <Mail size={size} />
+    );
+  }
+
   return (
     <Globe2 size={size} />
   );
@@ -425,10 +436,10 @@ function Inbox() {
   }, []);
 
   useEffect(() => {
+    setReplies([]);
+
     if (selected) {
       loadReplies(selected.id);
-    } else {
-      setReplies([]);
     }
   }, [selected?.id]);
 
@@ -806,6 +817,17 @@ function Inbox() {
 
     loadResponseMode();
   };
+
+  const savedReplySource =
+    [...replies]
+      .reverse()
+      .find(
+        (savedReply) =>
+          Boolean(savedReply.source)
+      )?.source ?? null;
+
+  const displayedReplySource =
+    replySource ?? savedReplySource;
 
   const filteredConversations =
     conversations.filter(
@@ -1655,13 +1677,13 @@ function Inbox() {
                 Sursa raspuns
               </span>
 
-              {replySource ? (
+              {displayedReplySource ? (
                 <strong className="ragSource">
                   <FileText
                     size={13}
                   />
 
-                  {replySource}
+                  {displayedReplySource}
                 </strong>
               ) : (
                 <strong className="mutedValue">
