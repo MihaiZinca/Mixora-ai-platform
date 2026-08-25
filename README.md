@@ -117,10 +117,3 @@ Frontend → `http://localhost:5173`
 API → `http://localhost:8000`
 
 > 🔒 Environment variables and credentials are kept outside version control.
-
----
-
-<p align="center">
-  <strong>MIXORA</strong><br>
-  Local AI. Grounded knowledge. Smarter customer operations.
-</p>
